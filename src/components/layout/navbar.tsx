@@ -28,7 +28,7 @@ export function Navbar() {
               </span>
             </div>
             <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono -mt-1">
-              eztap.com
+              by WakiCustom
             </span>
           </div>
         </Link>
