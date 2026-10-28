@@ -40,7 +40,7 @@ export function Navbar() {
             Live Customizer
           </Link>
           <Link href="#industries" className="hover:text-brand-600 dark:hover:text-white transition">Who It&apos;s For</Link>
-          <Link href="#features" className="hover:text-brand-600 dark:hover:text-white transition">Why EZTap</Link>
+          <Link href="#features" className="hover:text-brand-600 dark:hover:text-white transition">Why KonekTap</Link>
         </nav>
 
         {/* Desktop CTA Buttons & Theme Toggle */}
