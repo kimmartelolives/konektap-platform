@@ -27,7 +27,7 @@ export default function HomePage() {
           </h1>
 
           <p className="text-slate-600 dark:text-slate-300 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed font-normal">
-            Ditch outdated paper cards. Every EZTap smart card connects directly to your personalized hub.
+            Ditch outdated paper cards. Every KonekTap smart card connects directly to your personalized hub.
           </p>
         </div>
       </main>

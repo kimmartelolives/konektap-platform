@@ -21,7 +21,7 @@ export function Navbar() {
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
               <span className="font-display font-extrabold text-xl tracking-tight text-slate-900 dark:text-white">
-                EZ<span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-500 to-accent-500 dark:from-brand-400 dark:to-accent-400">Tap</span>
+                Konek<span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-500 to-accent-500 dark:from-brand-400 dark:to-accent-400">Tap</span>
               </span>
               <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-100 dark:bg-brand-500/20 text-brand-600 dark:text-brand-300 border border-brand-200 dark:border-brand-500/30">
                 NFC 2.0
