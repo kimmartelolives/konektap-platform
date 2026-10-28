@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { 
   UserPlus, Phone, Mail, CheckCircle2, ShieldCheck, ArrowUpRight, Loader2,
   Globe, Camera, Code, Briefcase, MessageCircle, PlaySquare, ThumbsUp 
@@ -7,8 +7,8 @@ import {
 import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
+import { CopyUsernameBadge, ProfileQrModalButton } from "@/components/profile/profile-interactive";
 
-// Helper map to match the platform string from the database to an icon
 const PLATFORM_ICONS: Record<string, React.ElementType> = {
   website: Globe,
   facebook: ThumbsUp,
@@ -23,20 +23,25 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
   await connection(); 
 
   const params = await paramsPromise;
+  const decodedParam = decodeURIComponent(params.username);
+
+  if (!decodedParam.startsWith("@")) {
+    redirect(`/@${decodedParam}`);
+  }
+
+  const cleanUsername = decodedParam.slice(1);
   const supabase = await createClient();
 
-  // 1. Fetch Profile
   const { data: profile } = await supabase
     .from("profiles")
     .select("*")
-    .eq("username", params.username)
+    .eq("username", cleanUsername)
     .single();
 
   if (!profile || !profile.is_published) {
     notFound(); 
   }
 
-  // 2. Fetch Social Links for this user, ordered by their drag-and-drop position
   const { data: links } = await supabase
     .from("social_links")
     .select("*")
@@ -70,32 +75,42 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                 </div>
               </div>
 
-              <div className="pt-20 w-full">
+              <div className="pt-20 w-full flex flex-col items-center">
                 <h1 className="font-display font-bold text-3xl md:text-4xl text-slate-900 dark:text-white tracking-tight">
                   {profile.full_name}
                 </h1>
+
+                {/* Copyable @username badge sa ilalim ng pangalan */}
+                <CopyUsernameBadge username={profile.username} />
+
                 {profile.profession && (
-                  <p className="text-sm md:text-base font-semibold text-brand-600 dark:text-accent-400 mt-2">
+                  <p className="text-sm md:text-base font-semibold text-brand-600 dark:text-accent-400 mt-3">
                     {profile.profession}
                   </p>
                 )}
                 
                 {profile.bio && (
-                  <div className="mt-6 pt-6 border-t border-slate-200 dark:border-white/10">
+                  <div className="mt-6 pt-6 border-t border-slate-200 dark:border-white/10 w-full">
                     <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
                       {profile.bio}
                     </p>
                   </div>
                 )}
 
-                <div className="mt-8">
+                {/* Save to Contacts + Maliit na QR Button sa tabi */}
+                <div className="mt-8 w-full flex items-center gap-3">
                   <a 
                     href={`/api/vcard/${profile.username}`} 
-                    className="w-full py-4 px-6 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-brand-600 dark:hover:bg-brand-500 font-semibold text-sm shadow-xl hover:shadow-brand-500/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                    className="flex-1 py-4 px-6 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-brand-600 dark:hover:bg-brand-500 font-semibold text-sm shadow-xl hover:shadow-brand-500/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
                   >
                     <UserPlus className="w-4 h-4" />
                     Save to Contacts
                   </a>
+
+                  <ProfileQrModalButton 
+                    username={profile.username} 
+                    fullName={profile.full_name} 
+                  />
                 </div>
               </div>
             </div>
@@ -186,7 +201,7 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
           
           <div className="mt-12 pt-8 text-center md:text-left flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-xs text-slate-500 font-medium">
-              &copy; {new Date().getFullYear()} {profile.full_name}.
+              &copy; 2026 {profile.full_name}.
             </p>
             <Link href="/" className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-200/50 dark:bg-white/5 text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10 transition-colors uppercase tracking-widest">
               <ShieldCheck className="w-3 h-3" />
