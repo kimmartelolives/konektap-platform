@@ -28,7 +28,8 @@ export default async function ProfileSettingsPage() {
         </p>
       </div>
 
-      <ProfileForm initialData={profile} />
+      {/* <ProfileForm initialData={profile} /> */}
+      <ProfileForm profile={profile} />
     </div>
   );
 }
