@@ -1,9 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
+import { Suspense } from "react";
+import { Loader2 } from "lucide-react";
 import { PortfolioManager } from "@/components/dashboard/portfolio-manager";
 
-export default async function PortfolioPage() {
+async function PortfolioContent() {
   await connection();
   
   const supabase = await createClient();
@@ -11,7 +13,6 @@ export default async function PortfolioPage() {
 
   if (!user) redirect("/login");
 
-  // Kunin ang lahat ng existing portfolio items para maipakita sa listahan
   const { data: portfolioItems } = await supabase
     .from("portfolio_items")
     .select("*")
@@ -19,6 +20,11 @@ export default async function PortfolioPage() {
     .order("position", { ascending: true })
     .order("created_at", { ascending: false });
 
+  return <PortfolioManager initialItems={portfolioItems || []} />;
+}
+
+
+export default function PortfolioPage() {
   return (
     <div className="space-y-6">
       <div>
@@ -30,7 +36,14 @@ export default async function PortfolioPage() {
         </p>
       </div>
 
-      <PortfolioManager initialItems={portfolioItems || []} />
+      <Suspense fallback={
+        <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-200 dark:border-white/10 rounded-3xl">
+          <Loader2 className="w-8 h-8 animate-spin text-brand-500 mb-4" />
+          <p className="text-sm text-slate-500 font-medium animate-pulse">Loading portfolio...</p>
+        </div>
+      }>
+        <PortfolioContent />
+      </Suspense>
     </div>
   );
 }
