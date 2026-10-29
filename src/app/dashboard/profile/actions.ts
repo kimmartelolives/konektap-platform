@@ -8,7 +8,36 @@ export async function updateProfile(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
-  // Sanitize the username (lowercase, no spaces, only letters/numbers/underscores)
+  const avatarFile = formData.get("avatar") as File | null;
+  let avatar_url = formData.get("existing_avatar_url") as string;
+
+  // Kung may in-upload na bagong picture
+  if (avatarFile && avatarFile.size > 0) {
+    
+    // 1. BURAHIN MUNA ANG LUMANG PICTURE (Kung meron man)
+    if (avatar_url) {
+      const oldFileName = avatar_url.split('/').pop(); // Kunin ang filename sa dulo ng URL
+      if (oldFileName) {
+        await supabase.storage.from("avatars").remove([oldFileName]);
+      }
+    }
+
+    // 2. I-UPLOAD ANG BAGONG PICTURE
+    const fileExt = avatarFile.name.split('.').pop();
+    const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(fileName, avatarFile);
+
+    if (uploadError) {
+      return { error: "Image upload failed: " + uploadError.message };
+    }
+
+    const { data: publicUrlData } = supabase.storage.from("avatars").getPublicUrl(fileName);
+    avatar_url = publicUrlData.publicUrl;
+  }
+
   const rawUsername = formData.get("username") as string;
   const username = rawUsername.toLowerCase().replace(/[^a-z0-9_]/g, "");
 
@@ -19,7 +48,8 @@ export async function updateProfile(formData: FormData) {
     bio: formData.get("bio") as string,
     phone_public: formData.get("phone_public") as string,
     email_public: formData.get("email_public") as string,
-    is_published: formData.get("is_published") === "on", // Checkbox
+    is_published: formData.get("is_published") === "on",
+    avatar_url: avatar_url,
   };
 
   const { error } = await supabase
@@ -28,7 +58,6 @@ export async function updateProfile(formData: FormData) {
     .eq("id", user.id);
 
   if (error) {
-    // Handle Supabase unique constraint error for usernames
     if (error.code === '23505') {
       return { error: "This username is already taken. Please choose another one." };
     }

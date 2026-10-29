@@ -8,6 +8,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { CopyUsernameBadge, ProfileQrModalButton } from "@/components/profile/profile-interactive";
+import { PortfolioGallery } from "@/components/profile/portfolio-gallery";
 
 const PLATFORM_ICONS: Record<string, React.ElementType> = {
   website: Globe,
@@ -32,6 +33,7 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
   const cleanUsername = decodedParam.slice(1);
   const supabase = await createClient();
 
+  // 1. Fetch Profile
   const { data: profile } = await supabase
     .from("profiles")
     .select("*")
@@ -42,11 +44,20 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
     notFound(); 
   }
 
+  // 2. Fetch Social Links
   const { data: links } = await supabase
     .from("social_links")
     .select("*")
     .eq("user_id", profile.id)
     .order("position", { ascending: true });
+
+  // 3. Fetch Portfolio Items (Bagong Dagdag!)
+  const { data: portfolioItems } = await supabase
+    .from("portfolio_items")
+    .select("*")
+    .eq("user_id", profile.id)
+    .order("position", { ascending: true })
+    .order("created_at", { ascending: false });
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-20 relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-700 ease-out">
@@ -66,9 +77,18 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
             <div className="px-8 pb-10 flex-1 relative flex flex-col items-center text-center">
               <div className="absolute -top-16">
                 <div className="relative group">
-                  <div className="w-32 h-32 rounded-[2rem] bg-slate-100 dark:bg-slate-800 object-cover border-[6px] border-white dark:border-[#14151a] shadow-xl flex items-center justify-center text-5xl font-display font-bold text-slate-400 uppercase rotate-0 group-hover:rotate-3 transition-transform duration-300">
-                    {profile.full_name?.charAt(0) || "U"}
-                  </div>
+                  {profile.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img 
+                      src={profile.avatar_url} 
+                      alt={profile.full_name}
+                      className="w-32 h-32 rounded-[2rem] object-cover border-[6px] border-white dark:border-[#14151a] shadow-xl rotate-0 group-hover:rotate-3 transition-transform duration-300 bg-white"
+                    />
+                  ) : (
+                    <div className="w-32 h-32 rounded-[2rem] bg-slate-100 dark:bg-slate-800 object-cover border-[6px] border-white dark:border-[#14151a] shadow-xl flex items-center justify-center text-5xl font-display font-bold text-slate-400 uppercase rotate-0 group-hover:rotate-3 transition-transform duration-300">
+                      {profile.full_name?.charAt(0) || "U"}
+                    </div>
+                  )}
                   <span className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-emerald-500 border-4 border-white dark:border-[#14151a] flex items-center justify-center text-white shadow-md">
                     <CheckCircle2 className="w-4 h-4" />
                   </span>
@@ -80,7 +100,6 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                   {profile.full_name}
                 </h1>
 
-                {/* Copyable @username badge sa ilalim ng pangalan */}
                 <CopyUsernameBadge username={profile.username} />
 
                 {profile.profession && (
@@ -97,7 +116,6 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                   </div>
                 )}
 
-                {/* Save to Contacts + Maliit na QR Button sa tabi */}
                 <div className="mt-8 w-full flex items-center gap-3">
                   <a 
                     href={`/api/vcard/${profile.username}`} 
@@ -106,21 +124,16 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                     <UserPlus className="w-4 h-4" />
                     Save to Contacts
                   </a>
-
-                  <ProfileQrModalButton 
-                    username={profile.username} 
-                    fullName={profile.full_name} 
-                  />
+                  <ProfileQrModalButton username={profile.username} fullName={profile.full_name} />
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Contact Grid & Social Links */}
+        {/* RIGHT COLUMN: Contact Grid, Social Links, & Portfolio */}
         <div className="flex-1 flex flex-col gap-8 lg:pt-6">
           
-          {/* Contact Section */}
           <section>
             <div className="flex items-center gap-4 mb-6">
               <div className="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
@@ -165,7 +178,6 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
             </div>
           </section>
 
-          {/* Social Links Section */}
           {links && links.length > 0 && (
             <section className="mt-4">
               <div className="flex items-center gap-4 mb-6">
@@ -198,6 +210,9 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
               </div>
             </section>
           )}
+
+          {/* PORTFOLIO SECTION MOUNTED HERE */}
+          <PortfolioGallery items={portfolioItems || []} />
           
           <div className="mt-12 pt-8 text-center md:text-left flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-xs text-slate-500 font-medium">
