@@ -49,8 +49,8 @@ export async function signInWithGoogle() {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      // This tells Google to send the user back to the callback route we built in Step 5
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+      // Pinalitan natin ito para direktang tumuro sa main domain mo
+      redirectTo: 'https://konektap-platform.vercel.app/auth/callback',
     },
   });
 
