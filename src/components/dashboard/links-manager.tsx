@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
+import { Plus, Trash2, GripVertical, Loader2, Globe } from "lucide-react";
+import { FaFacebook, FaInstagram, FaGithub, FaLinkedin, FaXTwitter, FaYoutube } from "react-icons/fa6";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
-import { GripVertical, Trash2, Plus, Globe, Camera, Code, Briefcase, MessageCircle, PlaySquare, ThumbsUp } from "lucide-react";
+
+// Siguraduhing tama ang import path ng iyong mga Server Actions:
 import { addLink, deleteLink, updateLinkOrder } from "@/app/dashboard/links/actions";
 
 type LinkItem = {
@@ -13,14 +16,15 @@ type LinkItem = {
   position: number;
 };
 
+// Ginawa nating Array ito para magamit sa Select Dropdown at magpakita ng totoong Logos
 const PLATFORMS = [
   { id: "website", name: "Website", icon: Globe },
-  { id: "facebook", name: "Facebook", icon: ThumbsUp },
-  { id: "instagram", name: "Instagram", icon: Camera },
-  { id: "linkedin", name: "LinkedIn", icon: Briefcase },
-  { id: "github", name: "GitHub", icon: Code },
-  { id: "twitter", name: "X / Twitter", icon: MessageCircle },
-  { id: "youtube", name: "YouTube", icon: PlaySquare },
+  { id: "facebook", name: "Facebook", icon: FaFacebook },
+  { id: "instagram", name: "Instagram", icon: FaInstagram },
+  { id: "linkedin", name: "LinkedIn", icon: FaLinkedin },
+  { id: "github", name: "GitHub", icon: FaGithub },
+  { id: "twitter", name: "Twitter / X", icon: FaXTwitter },
+  { id: "youtube", name: "YouTube", icon: FaYoutube },
 ];
 
 export function LinksManager({ initialLinks }: { initialLinks: LinkItem[] }) {
@@ -49,7 +53,6 @@ export function LinksManager({ initialLinks }: { initialLinks: LinkItem[] }) {
 
     startTransition(async () => {
       await addLink(formData);
-      // Let the server component re-fetch the real data
     });
   }
 
@@ -60,12 +63,13 @@ export function LinksManager({ initialLinks }: { initialLinks: LinkItem[] }) {
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
     
-    // Update position numbers
+    // Update local state position numbers
     const updatedItems = items.map((item, index) => ({ ...item, position: index }));
     setLinks(updatedItems);
 
-    startTransition(() => {
-      updateLinkOrder(updatedItems.map(item => ({ id: item.id, position: item.position })));
+    // I-save agad sa database sa pamamagitan ng Server Action!
+    startTransition(async () => {
+      await updateLinkOrder(updatedItems.map(item => ({ id: item.id, position: item.position })));
     });
   }
 
@@ -95,8 +99,8 @@ export function LinksManager({ initialLinks }: { initialLinks: LinkItem[] }) {
         </div>
         
         <button type="submit" disabled={isPending} className="w-full py-3 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-brand-600 dark:hover:bg-brand-500 font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2">
-          <Plus className="w-4 h-4" />
-          Add Link
+          {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          {isPending ? "Adding..." : "Add Link"}
         </button>
       </form>
 
@@ -134,6 +138,7 @@ export function LinksManager({ initialLinks }: { initialLinks: LinkItem[] }) {
                           </div>
                           
                           <button 
+                            type="button"
                             onClick={() => {
                               setLinks(links.filter(l => l.id !== link.id));
                               startTransition(() => { deleteLink(link.id); });

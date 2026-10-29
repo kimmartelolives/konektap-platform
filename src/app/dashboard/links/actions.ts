@@ -35,21 +35,27 @@ export async function deleteLink(id: string) {
   return { success: true };
 }
 
-export async function updateLinkOrder(links: { id: string; position: number }[]) {
+export async function updateLinkOrder(items: { id: string; position: number }[]) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
-  // Supabase 'upsert' updates multiple rows at once based on their ID
-  const updates = links.map(link => ({
-    id: link.id,
-    user_id: user.id,
-    position: link.position,
-  }));
+  // Isa-isang i-update ang position sa Supabase database
+  for (const item of items) {
+    await supabase
+      .from("social_links")
+      .update({ position: item.position })
+      .eq("id", item.id)
+      .eq("user_id", user.id);
+  }
 
-  const { error } = await supabase.from("social_links").upsert(updates, { onConflict: 'id' });
-  
-  if (error) return { error: error.message };
   revalidatePath("/dashboard/links");
+  
+  // Para mag-update agad ang public profile
+  const { data: profile } = await supabase.from("profiles").select("username").eq("id", user.id).single();
+  if (profile?.username) {
+    revalidatePath(`/@${profile.username}`);
+  }
+
   return { success: true };
 }

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Copy, Check, QrCode, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { trackLinkClick, trackVcardDownload } from "@/app/[username]/actions";
+import { UserPlus } from "lucide-react";
 
 // 1. Component para sa @username sa ilalim ng pangalan na pwedeng i-copy
 export function CopyUsernameBadge({ username }: { username: string }) {
@@ -104,5 +106,47 @@ export function ProfileQrModalButton({ username, fullName }: { username: string;
         </div>
       )}
     </>
+  );
+}
+
+export function ProfileThemeOverride({ mode }: { mode: string }) {
+  useEffect(() => {
+    if (!mode || mode === "system") return;
+
+    const html = document.documentElement;
+    html.classList.remove("light", "dark");
+    html.classList.add(mode);
+    html.style.colorScheme = mode;
+    html.setAttribute("data-theme", mode);
+  }, [mode]);
+
+  return null;
+}
+
+
+export function TrackedVcardButton({ username, className }: { username: string, className: string }) {
+  return (
+    <a 
+      href={`/api/vcard/${username}`} 
+      onClick={() => trackVcardDownload(username)}
+      className={className}
+    >
+      <UserPlus className="w-4 h-4" />
+      Save to Contacts
+    </a>
+  );
+}
+
+export function TrackedSocialLink({ link, className, children }: { link: any, className: string, children: React.ReactNode }) {
+  return (
+    <a 
+      href={link.url} 
+      target="_blank" 
+      rel="noopener noreferrer" 
+      onClick={() => trackLinkClick(link.id)}
+      className={className}
+    >
+      {children}
+    </a>
   );
 }
