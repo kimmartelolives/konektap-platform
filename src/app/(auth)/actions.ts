@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { headers } from "next/headers";
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
@@ -46,11 +47,14 @@ export async function signup(formData: FormData) {
 export async function signInWithGoogle() {
   const supabase = await createClient();
   
+  // Kunin ang origin kung saan nagmula ang request (awtomatikong nag-aadjust sa localhost o vercel)
+  const headerList = await headers();
+  const origin = headerList.get("origin") || "https://konektap-platform.vercel.app";
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      // Pinalitan natin ito para direktang tumuro sa main domain mo
-      redirectTo: 'https://konektap-platform.vercel.app/auth/callback',
+      redirectTo: `${origin}/auth/callback`,
     },
   });
 
