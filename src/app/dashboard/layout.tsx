@@ -29,32 +29,38 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-dark-950 flex flex-col md:flex-row">
-      {/* Sidebar */}
-      <aside className="w-full md:w-64 glass-card border-r border-slate-200 dark:border-white/10 flex flex-col shrink-0 md:min-h-screen sticky top-0 z-30">
-        <div className="p-6 border-b border-slate-200 dark:border-white/10 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center shadow-lg">
-            <Wifi className="rotate-90 text-white w-4 h-4" />
+      {/* Sidebar / Top Navigation for Mobile */}
+      <aside className="w-full md:w-64 glass-card border-b md:border-r border-slate-200 dark:border-white/10 flex flex-col shrink-0 md:min-h-screen sticky top-0 z-30">
+        <div className="p-4 md:p-6 border-b border-slate-200 dark:border-white/10 flex items-center justify-between md:justify-start gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center shadow-lg">
+              <Wifi className="rotate-90 text-white w-4 h-4" />
+            </div>
+            <span className="font-display font-bold text-lg text-slate-900 dark:text-white tracking-tight">KonekTap</span>
           </div>
-          <span className="font-display font-bold text-lg text-slate-900 dark:text-white tracking-tight">Dashboard</span>
+
+          {/* Mobile-only compact user / sign out trigger or minimalist indicator if needed */}
         </div>
         
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto flex md:block gap-2 overflow-x-auto">
+        {/* Navigation Links: Scrollable horizontally on mobile without ugly scrollbars, vertical on desktop */}
+        <nav className="flex-1 p-2 md:p-4 flex md:flex-col gap-1.5 overflow-x-auto scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {navLinks.map((link) => {
             const Icon = link.icon;
             return (
               <Link 
                 key={link.name} 
                 href={link.href}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-white/5 hover:text-brand-600 dark:hover:text-white transition whitespace-nowrap md:whitespace-normal"
+                className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-white/5 hover:text-brand-600 dark:hover:text-white transition whitespace-shrink-0 shrink-0 md:shrink"
               >
-                <Icon className="w-4 h-4" />
-                {link.name}
+                <Icon className="w-4 h-4 shrink-0" />
+                <span className="whitespace-nowrap md:whitespace-normal">{link.name}</span>
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-200 dark:border-white/10">
+        {/* User Info & Sign Out (Hidden or compacted on mobile view to save vertical space, full on desktop) */}
+        <div className="hidden md:block p-4 border-t border-slate-200 dark:border-white/10">
           <Suspense fallback={<div className="h-4 w-32 bg-slate-200 dark:bg-slate-800 rounded animate-pulse mb-2 ml-3"></div>}>
             <SidebarUserInfo />
           </Suspense>
@@ -66,10 +72,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
           </form>
         </div>
+
+        {/* Mobile bottom/side compact bar for Sign Out to prevent long scrolling */}
+        <div className="flex md:hidden items-center justify-between px-4 py-2 border-t border-slate-200 dark:border-white/10 bg-slate-100/50 dark:bg-dark-900/50">
+          <div className="max-w-[200px]">
+            <Suspense fallback={<div className="h-3 w-24 bg-slate-200 dark:bg-slate-800 rounded animate-pulse"></div>}>
+              <SidebarUserInfo />
+            </Suspense>
+          </div>
+          <form action="/auth/logout" method="POST">
+            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition">
+              <LogOut className="w-3.5 h-3.5" />
+              Sign Out
+            </button>
+          </form>
+        </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto relative">
+      <main className="flex-1 p-4 md:p-10 overflow-y-auto relative">
         <div className="max-w-4xl mx-auto">
           {children}
         </div>
