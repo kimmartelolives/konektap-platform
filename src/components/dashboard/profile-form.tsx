@@ -5,7 +5,6 @@ import { Save, AlertCircle, CheckCircle2, Camera, User, Link as LinkIcon, Briefc
 import { updateProfile } from "@/app/dashboard/profile/actions";
 import imageCompression from 'browser-image-compression';
 
-// Pinalitan natin ang "initialData" at ginawang "profile" para magtugma sa pinapasa ng page.tsx
 export function ProfileForm({ profile }: { profile: any }) {
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
@@ -14,7 +13,10 @@ export function ProfileForm({ profile }: { profile: any }) {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(profile?.avatar_url || null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isDemo = (profile?.tier || 'demo') === 'demo';
+
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (isDemo) return;
     const file = e.target.files?.[0];
     if (file) {
       setAvatarPreview(URL.createObjectURL(file));
@@ -27,6 +29,11 @@ export function ProfileForm({ profile }: { profile: any }) {
     const avatarFile = formData.get("avatar") as File;
     
     if (avatarFile && avatarFile.size > 0) {
+      if (isDemo) {
+        setMessage({ type: 'error', text: "Custom profile picture upload requires a Standard or Premium plan." });
+        return;
+      }
+
       const options = {
         maxSizeMB: 0.2,
         maxWidthOrHeight: 800,
@@ -66,9 +73,18 @@ export function ProfileForm({ profile }: { profile: any }) {
       {/* Hidden input para ma-retain ang lumang picture url */}
       <input type="hidden" name="existing_avatar_url" value={profile?.avatar_url || ""} />
 
-      {/* AVATAR UPLOADER UI */}
+      {/* AVATAR UPLOADER UI (Locked kung Demo Tier) */}
       <div className="flex flex-col items-center sm:flex-row sm:items-start gap-6 pb-6 border-b border-slate-200 dark:border-white/10">
-        <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+        <div 
+          className={`relative group ${isDemo ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
+          onClick={() => {
+            if (isDemo) {
+              setMessage({ type: 'error', text: "Custom profile picture upload requires a Standard or Premium plan." });
+              return;
+            }
+            fileInputRef.current?.click();
+          }}
+        >
           <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-4 border-white dark:border-dark-900 shadow-lg flex items-center justify-center relative">
             {avatarPreview ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -77,27 +93,41 @@ export function ProfileForm({ profile }: { profile: any }) {
               <User className="w-10 h-10 text-slate-400" />
             )}
             
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-              <Camera className="w-6 h-6 text-white" />
+            <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity ${isDemo ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+              {isDemo ? (
+                <span className="text-[10px] font-bold text-white bg-black/60 px-2 py-1 rounded-md">LOCKED</span>
+              ) : (
+                <Camera className="w-6 h-6 text-white" />
+              )}
             </div>
           </div>
           
-          <button type="button" className="absolute bottom-0 right-0 p-1.5 rounded-full bg-brand-500 text-white shadow-sm border-2 border-white dark:border-dark-900 group-hover:scale-110 transition-transform">
-            <Camera className="w-3.5 h-3.5" />
-          </button>
+          {!isDemo && (
+            <button type="button" className="absolute bottom-0 right-0 p-1.5 rounded-full bg-brand-500 text-white shadow-sm border-2 border-white dark:border-dark-900 group-hover:scale-110 transition-transform">
+              <Camera className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           <input 
             ref={fileInputRef}
             type="file" 
             name="avatar" 
             accept="image/*" 
+            disabled={isDemo}
             onChange={handleImageChange}
             className="hidden" 
           />
         </div>
         <div className="text-center sm:text-left pt-2">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Profile Picture</h3>
-          <p className="text-xs text-slate-500 mt-1 max-w-[200px]">Upload a square image (JPG, PNG). Max size 2MB.</p>
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            Profile Picture 
+            {isDemo && <span className="text-[10px] bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded-full font-mono">Demo Locked</span>}
+          </h3>
+          <p className="text-xs text-slate-500 mt-1 max-w-[220px]">
+            {isDemo 
+              ? "Upgrading to Standard or Premium is required to change your custom avatar." 
+              : "Upload a square image (JPG, PNG). Max size 2MB."}
+          </p>
         </div>
       </div>
 

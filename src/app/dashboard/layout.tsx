@@ -1,38 +1,66 @@
 import Link from "next/link";
-import { User, Link as LinkIcon, Image, Palette, CreditCard, BarChart, LogOut, Wifi } from "lucide-react";
+// 1. Idinagdag ang 'Inbox' dito sa import:
+import { User, Link as LinkIcon, Image, Palette, CreditCard, BarChart, LogOut, Wifi, Inbox, Briefcase } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import MobileNav from "@/components/dashboard/MobileNav";
+import { AccountTier, TIER_CONFIG } from "@/components/dashboard/TierGate";
 
-const navLinks = [
-  { name: "Overview", href: "/dashboard", icon: BarChart },
-  { name: "Profile Info", href: "/dashboard/profile", icon: User },
-  { name: "Social Links", href: "/dashboard/links", icon: LinkIcon },
-  { name: "Portfolio", href: "/dashboard/portfolio", icon: Image },
-  { name: "Appearance", href: "/dashboard/appearance", icon: Palette },
-  { name: "NFC Cards", href: "/dashboard/nfc-cards", icon: CreditCard },
-];
+const navLinks: Array<{ name: string; href: string; icon: any; minTier?: AccountTier }> = [
+    { name: "Overview", href: "/dashboard", icon: BarChart },
+    { name: "Profile Info", href: "/dashboard/profile", icon: User },
+    { name: "Social Links", href: "/dashboard/links", icon: LinkIcon },
+    { name: "Portfolio", href: "/dashboard/portfolio", icon: Image, minTier: "standard" },
+    { name: "Leads", href: "/dashboard/leads", icon: Inbox, minTier: "standard" },
+    { name: "Business Hub", href: "/dashboard/business", icon: Briefcase, minTier: "premium" },
+    { name: "Appearance", href: "/dashboard/appearance", icon: Palette, minTier: "standard" },
+    { name: "NFC Cards", href: "/dashboard/nfc-cards", icon: CreditCard, minTier: "standard" },
+  ];
 
-async function getEmail() {
-  await connection(); // dynamic access first, so Date.now() inside Supabase runs at request time
+async function getUserAccountInfo(): Promise<{ email?: string; tier: AccountTier }> {
+  await connection();
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  return user?.email;
+
+  if (!user) {
+    return { email: undefined, tier: "demo" };
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("tier")
+    .eq("id", user.id)
+    .single();
+
+  const tier = (profile?.tier as AccountTier) || "demo";
+  return { email: user.email, tier };
 }
 
 async function SidebarUserInfo() {
-  const email = await getEmail();
+  const { email, tier } = await getUserAccountInfo();
+  const badge = TIER_CONFIG[tier];
+
   return (
-    <p className="text-xs text-slate-500 dark:text-slate-400 truncate px-3 mb-2">
-      {email}
-    </p>
+    <div className="px-3 mb-3 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          Account Plan
+        </span>
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.badgeClass}`}>
+          {badge.label}
+        </span>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+        {email}
+      </p>
+    </div>
   );
 }
 
 async function MobileNavWithUser() {
-  const email = await getEmail();
-  return <MobileNav userEmail={email} />;
+  const { email, tier } = await getUserAccountInfo();
+  return <MobileNav userEmail={email} userTier={tier} />;
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -69,7 +97,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </nav>
 
         <div className="p-4 border-t border-slate-200 dark:border-white/10">
-          <Suspense fallback={<div className="h-4 w-32 bg-slate-200 dark:bg-slate-800 rounded animate-pulse mb-2 ml-3" />}>
+          <Suspense fallback={<div className="h-10 w-full bg-slate-200 dark:bg-slate-800 rounded animate-pulse mb-2" />}>
             <SidebarUserInfo />
           </Suspense>
 

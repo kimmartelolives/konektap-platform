@@ -12,6 +12,7 @@ import { connection } from "next/server";
 import { CopyUsernameBadge, ProfileQrModalButton, ProfileThemeOverride, TrackedVcardButton, TrackedSocialLink } from "@/components/profile/profile-interactive";
 import { PortfolioGallery } from "@/components/profile/portfolio-gallery";
 import { ProfileTracker } from "@/components/profile/profile-tracker";
+import PublicLeadAndContact from "@/components/profile/PublicLeadAndContact"; // <--- IDINAGDAG NATIN DITO
 
 const PLATFORM_ICONS: Record<string, React.ElementType> = {
   website: Globe,
@@ -19,7 +20,7 @@ const PLATFORM_ICONS: Record<string, React.ElementType> = {
   instagram: FaInstagram,
   linkedin: FaLinkedin,
   github: FaGithub,
-  twitter: FaXTwitter, // Gamit ang bagong X logo para sa Twitter
+  twitter: FaXTwitter, 
   youtube: FaYoutube,
 };
 
@@ -152,7 +153,6 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                   )}
 
                   <div className="mt-8 w-full flex items-center gap-3">
-                    {/* NAAYOS NA: Iisang Tracking Button na lang para sa vCard */}
                     <TrackedVcardButton 
                       username={profile.username} 
                       className={`flex-1 py-4 px-6 font-semibold text-sm shadow-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${shapeClass} ${THEME_BUTTONS[profile.theme] || THEME_BUTTONS.default}`} 
@@ -164,7 +164,7 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Contact Grid, Social Links, & Portfolio */}
+          {/* RIGHT COLUMN: Contact Grid, Lead Form, Social Links, & Portfolio */}
           <div className="flex-1 flex flex-col gap-8 lg:pt-6">
             
             <section>
@@ -209,6 +209,18 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                   </a>
                 )}
               </div>
+
+              {/* IDINAGDAG NATIN DITO ANG LEAD CAPTURE FORM TRIGGER */}
+              <div className="mt-4">
+                <PublicLeadAndContact 
+                  profileId={profile.id}
+                  username={profile.username}
+                  publicPhone={profile.phone_public}
+                  publicEmail={profile.email_public}
+                  showLeadForm={profile.show_lead_form ?? true}
+                  userTier={profile.tier || "demo"}
+                />
+              </div>
             </section>
 
             {links && links.length > 0 && (
@@ -224,7 +236,6 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                     const Icon = PLATFORM_ICONS[link.platform] || Globe;
                     
                     return (
-                      /* NAAYOS NA: Ginawa nang TrackedSocialLink para mabilang ang clicks */
                       <TrackedSocialLink key={link.id} link={link} className={`group p-1 bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 hover:border-brand-300 dark:hover:border-brand-500/50 shadow-sm hover:shadow-xl hover:shadow-brand-500/10 transition-all block ${shapeClass}`}>
                         <div className="p-5 flex items-center justify-between">
                           <div className="flex items-center gap-4 overflow-hidden">

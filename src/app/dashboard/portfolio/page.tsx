@@ -4,14 +4,24 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 import { PortfolioManager } from "@/components/dashboard/portfolio-manager";
+import TierGate, { AccountTier } from "@/components/dashboard/TierGate";
 
 async function PortfolioContent() {
   await connection();
-  
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
+
+  // Get the user's tier along with their portfolio items
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("tier")
+    .eq("id", user.id)
+    .single();
+
+  const userTier = (profile?.tier as AccountTier) || "demo";
 
   const { data: portfolioItems } = await supabase
     .from("portfolio_items")
@@ -20,9 +30,17 @@ async function PortfolioContent() {
     .order("position", { ascending: true })
     .order("created_at", { ascending: false });
 
-  return <PortfolioManager initialItems={portfolioItems || []} />;
+  return (
+    <TierGate
+      userTier={userTier}
+      requiredTier="standard"
+      featureName="Portfolio & Work Gallery"
+      description="Building a portfolio gallery and showcasing your work on your public card is available for Standard and Premium accounts."
+    >
+      <PortfolioManager initialItems={portfolioItems || []} />
+    </TierGate>
+  );
 }
-
 
 export default function PortfolioPage() {
   return (

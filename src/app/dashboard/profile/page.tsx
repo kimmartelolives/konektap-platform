@@ -4,6 +4,7 @@ import { ProfileForm } from "@/components/dashboard/profile-form";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
+import { AccountTier } from "@/components/dashboard/TierGate";
 
 async function ProfileContent() {
   await connection(); 
@@ -15,14 +16,17 @@ async function ProfileContent() {
     redirect("/login");
   }
 
-  // Fetch the existing profile data
+  // Fetch the existing profile data including tier
   const { data: profile } = await supabase
     .from("profiles")
     .select("*")
     .eq("id", user.id)
     .single();
 
-  return <ProfileForm profile={profile || {}} />;
+  const userTier = (profile?.tier as AccountTier) || "demo";
+
+  // Ipinapasa natin ang userTier kasama ang profile data papuntang ProfileForm
+  return <ProfileForm profile={{ ...(profile || {}), tier: userTier }} />;
 }
 
 export default function ProfilePage() {

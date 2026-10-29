@@ -9,10 +9,36 @@ export async function savePortfolioItem(formData: FormData) {
   if (!user) return { error: "Unauthorized" };
 
   const itemId = formData.get("id") as string | null;
-  // Kunin lahat ng in-upload na bagong pictures (array of files)
+
+  // --- TIER LIMIT ENFORCEMENT (Only for new item inserts) ---
+  if (!itemId) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("tier")
+      .eq("id", user.id)
+      .single();
+
+    const userTier = (profile?.tier || "demo") as "demo" | "standard" | "premium";
+    const maxItems = userTier === "premium" ? 99 : userTier === "standard" ? 6 : 0;
+
+    const { count } = await supabase
+      .from("portfolio_items")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id);
+
+    if ((count || 0) >= maxItems) {
+      const nextTier = userTier === "demo" ? "Standard" : "Premium";
+      return { 
+        error: `Your ${userTier.toUpperCase()} plan is limited to ${maxItems} portfolio items. Upgrade to ${nextTier} for more!` 
+      };
+    }
+  }
+  // -----------------------------------------------------------
+
+  // Get all newly uploaded pictures (array of files)
   const imageFiles = formData.getAll("images") as File[];
   
-  // Kunin ang mga retained/existing image URLs (parsed from JSON string sa form)
+  // Get the retained/existing image URLs (parsed from JSON string in the form)
   let image_urls: string[] = [];
   const existingImagesRaw = formData.get("existing_image_urls") as string;
   if (existingImagesRaw) {
@@ -23,7 +49,7 @@ export async function savePortfolioItem(formData: FormData) {
     }
   }
 
-  // 1. Kung may mga in-upload na bagong picture, i-upload sa Supabase isa-isa
+  // If there are newly uploaded pictures, upload them to Supabase one by one
   const newUrls: string[] = [];
   if (imageFiles.length > 0) {
     for (const file of imageFiles) {
@@ -40,7 +66,7 @@ export async function savePortfolioItem(formData: FormData) {
     }
   }
 
-  // Pagsamahin ang mga lumang natira at ang mga bagong upload
+  // Merge the retained old images with the newly uploaded ones
   const finalImageUrls = [...image_urls, ...newUrls];
 
   const itemData = {
@@ -70,7 +96,7 @@ export async function savePortfolioItem(formData: FormData) {
   return { success: true };
 }
 
-// Para mag-delete ng file mula sa storage nang manu-mano (kung ini-X nila ang picture habang nag-eedit)
+// Manually delete a file from storage (if they removed the picture while editing)
 export async function deletePortfolioImage(imageUrl: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -88,7 +114,7 @@ export async function deletePortfolioItem(itemId: string, imageUrls: string[]) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
-  // Burahin lahat ng pictures ng item na ito sa storage
+  // Delete all pictures of this item from storage
   if (imageUrls && imageUrls.length > 0) {
     const fileNames = imageUrls.map(url => url.split('/').pop()).filter(Boolean) as string[];
     if (fileNames.length > 0) {

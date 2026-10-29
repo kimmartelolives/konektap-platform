@@ -4,10 +4,11 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 import { AppearanceManager } from "@/components/dashboard/appearance-manager";
+import TierGate, { AccountTier } from "@/components/dashboard/TierGate";
 
 async function AppearanceContent() {
   await connection();
-  
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -19,7 +20,18 @@ async function AppearanceContent() {
     .eq("id", user.id)
     .single();
 
-  return <AppearanceManager profile={profile || {}} />;
+  const userTier = (profile?.tier as AccountTier) || "demo";
+
+  return (
+    <TierGate
+      userTier={userTier}
+      requiredTier="standard"
+      featureName="Custom Appearance & Themes"
+      description="Customizing the colors, theme, and fonts of your digital card is available for Standard and Premium accounts."
+    >
+      <AppearanceManager profile={profile || {}} />
+    </TierGate>
+  );
 }
 
 export default function AppearancePage() {

@@ -5,8 +5,9 @@ import { headers } from "next/headers";
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 import { NfcCardManager } from "@/components/dashboard/nfc-card-manager";
+import TierGate, { AccountTier } from "@/components/dashboard/TierGate";
 
-// Listahan ng iyong Admin emails na pwedeng makakita ng Manufacturing Tools
+// List of Admin emails that can see the Manufacturing Tools
 const ADMIN_EMAILS = [
   "kimmartel.olives@gmail.com",
   "wakicustomshop@gmail.com",
@@ -14,18 +15,34 @@ const ADMIN_EMAILS = [
 
 async function NfcContent() {
   await connection();
-  
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
 
+  // Get the profile for tier, username, and is_published
   const { data: profile } = await supabase
     .from("profiles")
-    .select("username, is_published")
+    .select("username, is_published, tier")
     .eq("id", user.id)
     .single();
 
+  const userTier = (profile?.tier as AccountTier) || "demo";
+
+  return (
+    <TierGate
+      userTier={userTier}
+      requiredTier="standard"
+      featureName="Smart Card & Digital QR Pass"
+      description="Managing your KonekTap NFC card link, downloading your high-res QR pass, and related tools are available for Standard and Premium accounts."
+    >
+      <NfcRestrictedContent profile={profile} user={user} />
+    </TierGate>
+  );
+}
+
+async function NfcRestrictedContent({ profile, user }: { profile: any; user: any }) {
   if (!profile?.username) {
     return (
       <div className="glass-card p-8 rounded-3xl border border-rose-200 bg-rose-50 dark:bg-rose-500/10 text-center">
@@ -42,13 +59,13 @@ async function NfcContent() {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || `${protocol}://${host}`;
   const profileUrl = `${baseUrl}/@${profile.username}`;
 
-  // Check kung ikaw ang naka-login
+  // Check if the logged-in user is an admin
   const isAdmin = user.email ? ADMIN_EMAILS.includes(user.email) : false;
 
   return (
-    <NfcCardManager 
-      profileUrl={profileUrl} 
-      username={profile.username} 
+    <NfcCardManager
+      profileUrl={profileUrl}
+      username={profile.username}
       isPublished={!!profile.is_published}
       isAdmin={isAdmin}
     />

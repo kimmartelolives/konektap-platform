@@ -8,6 +8,29 @@ export async function addLink(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
+  // 1. Fetch user tier from profiles table
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("tier")
+    .eq("id", user.id)
+    .single();
+
+  const userTier = (profile?.tier || "demo") as "demo" | "standard" | "premium";
+  const maxLinks = userTier === "premium" ? 99 : userTier === "standard" ? 10 : 2;
+
+  // 2. Check existing social links count against tier limit
+  const { count } = await supabase
+    .from("social_links")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  if ((count || 0) >= maxLinks) {
+    const nextTier = userTier === "demo" ? "Standard or Premium" : "Premium";
+    return { 
+      error: `Your ${userTier.toUpperCase()} plan is limited to ${maxLinks} social links. Upgrade to ${nextTier} to add more!` 
+    };
+  }
+
   const newLink = {
     user_id: user.id,
     title: formData.get("title") as string,
@@ -40,7 +63,7 @@ export async function updateLinkOrder(items: { id: string; position: number }[])
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
-  // Isa-isang i-update ang position sa Supabase database
+  // Update position in Supabase database one by one
   for (const item of items) {
     await supabase
       .from("social_links")
@@ -51,7 +74,7 @@ export async function updateLinkOrder(items: { id: string; position: number }[])
 
   revalidatePath("/dashboard/links");
   
-  // Para mag-update agad ang public profile
+  // Update public profile immediately to reflect the new order
   const { data: profile } = await supabase.from("profiles").select("username").eq("id", user.id).single();
   if (profile?.username) {
     revalidatePath(`/@${profile.username}`);
