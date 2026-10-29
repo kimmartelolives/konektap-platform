@@ -1,10 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
-import { Eye, Link as LinkIcon, Download, MousePointerClick, ArrowUpRight, TrendingUp, Trophy } from "lucide-react";
+import { Eye, Link as LinkIcon, Download, MousePointerClick, ArrowUpRight, TrendingUp, Trophy, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 
-export default async function DashboardOverview() {
+// 1. Ilipat ang buong logic sa async component na ito
+async function DashboardContent() {
   await connection();
   
   const supabase = await createClient();
@@ -12,19 +14,19 @@ export default async function DashboardOverview() {
 
   if (!user) redirect("/login");
 
-  // 1. Fetch Profile Stats
+  // Fetch Profile Stats
   const { data: profile } = await supabase
     .from("profiles")
     .select("username, views, vcard_downloads, full_name")
     .eq("id", user.id)
     .single();
 
-  // 2. Fetch all Social Links to calculate total clicks and top link
+  // Fetch all Social Links to calculate total clicks and top link
   const { data: links } = await supabase
     .from("social_links")
     .select("*")
     .eq("user_id", user.id)
-    .order("clicks", { ascending: false }); // Naka-sort na yung pinakamaraming clicks sa itaas
+    .order("clicks", { ascending: false });
 
   // Calculations
   const totalClicks = links?.reduce((sum, link) => sum + (link.clicks || 0), 0) || 0;
@@ -151,5 +153,19 @@ export default async function DashboardOverview() {
       </div>
 
     </div>
+  );
+}
+
+// 2. Ang Root Page na nakabalot sa Suspense
+export default function DashboardOverview() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-col items-center justify-center min-h-[50vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-brand-500 mb-4" />
+        <p className="text-sm text-slate-500 font-medium animate-pulse">Loading analytics...</p>
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   );
 }
