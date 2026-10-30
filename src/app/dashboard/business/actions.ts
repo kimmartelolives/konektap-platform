@@ -22,6 +22,33 @@ async function verifyPremiumUser() {
   return { supabase, user, username: profile?.username, error: null };
 }
 
+// Helper: Auto-format Google Drive sharing links into preview/download/image links
+function formatGoogleDriveUrl(
+  url: string,
+  mode: "view" | "download" | "image"
+): string {
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+
+  const fileIdMatch =
+    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+
+  if (fileIdMatch && fileIdMatch[1] && trimmed.includes("drive.google.com")) {
+    const fileId = fileIdMatch[1];
+    if (mode === "download") {
+      return `https://drive.google.com/uc?export=download&id=${fileId}`;
+    }
+    if (mode === "image") {
+      return `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
+    }
+    return `https://drive.google.com/file/d/${fileId}/preview`;
+  }
+
+  return trimmed;
+}
+
 // 1. Add a Service Item
 export async function addService(formData: FormData) {
   const { supabase, user, username, error: authError } = await verifyPremiumUser();
@@ -108,7 +135,7 @@ export async function updateServiceOrder(items: { id: string; position: number }
   return { success: true };
 }
 
-// 5. Update Map, Appointments, or Catalog Settings
+// 5. Update Map, Appointments, or Catalog Settings (Direct URLs + GDrive Formatter)
 export async function updateBusinessSettings(formData: FormData) {
   const { supabase, user, username, error: authError } = await verifyPremiumUser();
   if (authError || !user) return { error: authError };
@@ -127,40 +154,34 @@ export async function updateBusinessSettings(formData: FormData) {
 
     updates.location_address = rawAddress.trim();
     updates.map_embed_url = rawMapUrl.trim();
-    
-    // Capture manual pin coordinates if provided
-    const lat = formData.get("latitude");
-    const lng = formData.get("longitude");
-    updates.latitude = lat ? Number(lat) : null;
-    updates.longitude = lng ? Number(lng) : null;
-
   } else if (section === "appointments") {
     updates.booking_enabled = formData.get("booking_enabled") === "on";
-    updates.booking_url = formData.get("booking_url") as string;
+    updates.booking_url = ((formData.get("booking_url") as string) || "").trim();
+    updates.booking_title =
+      ((formData.get("booking_title") as string) || "").trim() ||
+      "Book an Appointment";
+    updates.booking_description = (
+      (formData.get("booking_description") as string) || ""
+    ).trim();
+    updates.booking_platform =
+      (formData.get("booking_platform") as string) || "calendar";
   } else if (section === "catalog") {
-    updates.catalog_title = (formData.get("catalog_title") as string) || "View Product Catalog / Menu";
-    
-    const pdfFile = formData.get("catalog_file") as File | null;
-    const directUrl = formData.get("catalog_pdf_url") as string;
+    const actionType =
+      ((formData.get("catalog_action_type") as string) || "view") === "download"
+        ? "download"
+        : "view";
+    const rawPdfUrl = ((formData.get("catalog_pdf_url") as string) || "").trim();
+    const rawCoverUrl = ((formData.get("catalog_cover_url") as string) || "").trim();
 
-    if (pdfFile && pdfFile.size > 0) {
-      const fileExt = pdfFile.name.split(".").pop();
-      const fileName = `${user.id}-catalog-${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("portfolio")
-        .upload(fileName, pdfFile, { upsert: true });
-
-      if (uploadError) return { error: uploadError.message };
-
-      const { data: publicUrlData } = supabase.storage
-        .from("portfolio")
-        .getPublicUrl(fileName);
-
-      updates.catalog_pdf_url = publicUrlData.publicUrl;
-    } else if (directUrl !== null) {
-      updates.catalog_pdf_url = directUrl;
-    }
+    updates.catalog_title =
+      ((formData.get("catalog_title") as string) || "").trim() ||
+      "View Product Catalog / Menu";
+    updates.catalog_description = (
+      (formData.get("catalog_description") as string) || ""
+    ).trim();
+    updates.catalog_action_type = actionType;
+    updates.catalog_pdf_url = formatGoogleDriveUrl(rawPdfUrl, actionType);
+    updates.catalog_cover_url = formatGoogleDriveUrl(rawCoverUrl, "image");
   }
 
   const { error } = await supabase
@@ -173,4 +194,21 @@ export async function updateBusinessSettings(formData: FormData) {
   revalidatePath("/dashboard/business");
   if (username) revalidatePath(`/@${username}`);
   return { success: true };
+}
+
+// 6. Public Click & Conversion Tracker for Appointments & Catalog
+export async function trackBusinessHubClick(
+  profileId: string,
+  clickType: "booking" | "catalog"
+) {
+  if (!profileId) return;
+  try {
+    const supabase = await createClient();
+    await supabase.rpc("increment_business_hub_click", {
+      target_profile_id: profileId,
+      click_type: clickType,
+    });
+  } catch {
+    // Non-blocking analytics call
+  }
 }

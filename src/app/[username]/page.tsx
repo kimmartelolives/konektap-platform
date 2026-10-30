@@ -1,18 +1,25 @@
 import { createClient } from "@/lib/supabase/server";
 import { notFound, redirect } from "next/navigation";
-import { 
-  Phone, Mail, CheckCircle2, ShieldCheck, ArrowUpRight, Loader2, UserPlus, Globe 
+import {
+  Phone, Mail, CheckCircle2, ShieldCheck, ArrowUpRight, Loader2, Globe
 } from "lucide-react";
-import { 
-  FaFacebook, FaInstagram, FaGithub, FaLinkedin, FaXTwitter, FaYoutube 
+import {
+  FaFacebook, FaInstagram, FaGithub, FaLinkedin, FaXTwitter, FaYoutube
 } from "react-icons/fa6";
 import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { CopyUsernameBadge, ProfileQrModalButton, ProfileThemeOverride, TrackedVcardButton, TrackedSocialLink } from "@/components/profile/profile-interactive";
+import {
+  CopyUsernameBadge,
+  ProfileQrModalButton,
+  ProfileThemeOverride,
+  TrackedVcardButton,
+  TrackedSocialLink
+} from "@/components/profile/profile-interactive";
 import { PortfolioGallery } from "@/components/profile/portfolio-gallery";
 import { ProfileTracker } from "@/components/profile/profile-tracker";
-import PublicLeadAndContact from "@/components/profile/PublicLeadAndContact"; // <--- IDINAGDAG NATIN DITO
+import PublicLeadAndContact from "@/components/profile/PublicLeadAndContact";
+import { BusinessHubDisplay } from "@/components/profile/business-hub-display";
 
 const PLATFORM_ICONS: Record<string, React.ElementType> = {
   website: Globe,
@@ -20,16 +27,25 @@ const PLATFORM_ICONS: Record<string, React.ElementType> = {
   instagram: FaInstagram,
   linkedin: FaLinkedin,
   github: FaGithub,
-  twitter: FaXTwitter, 
+  twitter: FaXTwitter,
   youtube: FaYoutube,
 };
 
 const THEME_BANNERS: Record<string, string> = {
   default: "bg-gradient-to-br from-brand-600 via-indigo-600 to-accent-500",
   emerald: "bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700",
-  midnight: "bg-gradient-to-br from-slate-900 via-slate-800 to-zinc-900",
+  midnight: "bg-gradient-to-br from-slate-950 via-slate-800 to-zinc-900",
   rose: "bg-gradient-to-br from-rose-500 via-red-500 to-pink-600",
   cyber: "bg-gradient-to-br from-cyan-500 via-blue-600 to-purple-600",
+  amethyst: "bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600",
+};
+
+// Extra accents drawn on top of the banner gradient (Midnight Gold gets a gold glow + hairline)
+const THEME_BANNER_ACCENTS: Record<string, { glow: string; line: string }> = {
+  midnight: {
+    glow: "bg-[radial-gradient(ellipse_at_top_right,rgba(245,158,11,0.35),transparent_60%)]",
+    line: "via-amber-400/60",
+  },
 };
 
 const THEME_BUTTONS: Record<string, string> = {
@@ -38,231 +54,417 @@ const THEME_BUTTONS: Record<string, string> = {
   midnight: "bg-amber-500 text-slate-900 hover:bg-amber-400 shadow-amber-500/25",
   rose: "bg-rose-600 text-white hover:bg-rose-500 shadow-rose-500/25",
   cyber: "bg-cyan-500 text-slate-900 hover:bg-cyan-400 shadow-cyan-500/25",
+  amethyst: "bg-purple-600 text-white hover:bg-purple-500 shadow-purple-500/25",
 };
 
-async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ username: string }> }) {
-  await connection(); 
+// Accent color for the profession line (matches the theme, like the Appearance preview)
+const THEME_TEXT: Record<string, { base: string; glass: string }> = {
+  default: { base: "text-brand-600 dark:text-accent-400", glass: "text-accent-400" },
+  emerald: { base: "text-emerald-600 dark:text-emerald-400", glass: "text-emerald-400" },
+  midnight: { base: "text-amber-600 dark:text-amber-400", glass: "text-amber-400" },
+  rose: { base: "text-rose-600 dark:text-rose-400", glass: "text-rose-400" },
+  cyber: { base: "text-cyan-600 dark:text-cyan-400", glass: "text-cyan-400" },
+  amethyst: { base: "text-violet-600 dark:text-violet-400", glass: "text-violet-400" },
+};
 
-  const params = await paramsPromise;
-  const decodedParam = decodeURIComponent(params.username);
+// Vivid colors for the Glass-mode background glow. The banner gradients are too dark
+// for Midnight, so the glow was invisible before.
+const THEME_GLOWS: Record<string, string> = {
+  default: "bg-gradient-to-br from-brand-500 via-indigo-500 to-accent-500",
+  emerald: "bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-500",
+  midnight: "bg-gradient-to-br from-amber-500 via-indigo-600 to-purple-700",
+  rose: "bg-gradient-to-br from-rose-500 via-red-500 to-pink-500",
+  cyber: "bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-500",
+  amethyst: "bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500",
+};
+
+/* ---------------- Helpers ---------------- */
+
+function safeDecode(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null; // malformed URL like /%E0%A4%A
+  }
+}
+
+// Only plain http(s) links are allowed (blocks javascript:, data:, etc.)
+function isSafeHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function telHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, "")}`;
+}
+
+function mailHref(email: string): string {
+  return `mailto:${encodeURIComponent(email.trim()).replace(/%40/g, "@")}`;
+}
+
+async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ username: string }> }) {
+  await connection();
+
+  const { username } = await paramsPromise;
+  const decodedParam = safeDecode(username);
+  if (decodedParam === null) notFound();
 
   if (!decodedParam.startsWith("@")) {
-    redirect(`/@${decodedParam}`);
+    redirect(`/@${encodeURIComponent(decodedParam)}`);
   }
 
   const cleanUsername = decodedParam.slice(1);
+  if (!cleanUsername) notFound();
+
   const supabase = await createClient();
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("*")
     .eq("username", cleanUsername)
-    .single();
+    .maybeSingle();
 
   if (!profile || !profile.is_published) {
-    notFound(); 
+    notFound();
   }
 
-  const { data: links } = await supabase
-    .from("social_links")
-    .select("*")
-    .eq("user_id", profile.id)
-    .order("position", { ascending: true });
+  // These three queries don't depend on each other, so run them in parallel
+  const [{ data: links }, { data: portfolioItems }, { data: services }] = await Promise.all([
+    supabase
+      .from("social_links")
+      .select("*")
+      .eq("user_id", profile.id)
+      .order("position", { ascending: true }),
+    supabase
+      .from("portfolio_items")
+      .select("*")
+      .eq("user_id", profile.id)
+      .order("position", { ascending: true })
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("services")
+      .select("id, title, price, description, position")
+      .eq("user_id", profile.id)
+      .order("position", { ascending: true }),
+  ]);
 
-  const { data: portfolioItems } = await supabase
-    .from("portfolio_items")
-    .select("*")
-    .eq("user_id", profile.id)
-    .order("position", { ascending: true })
-    .order("created_at", { ascending: false });
+  // Never render a link with an unsafe protocol on a public page
+  const safeLinks = (links ?? []).filter(
+    (link) => typeof link.url === "string" && isSafeHttpUrl(link.url)
+  );
 
   const shapeClass = profile.button_shape || "rounded-2xl";
   const fontClass = profile.font_style || "font-sans";
+  const themeId: string = profile.theme in THEME_BANNERS ? profile.theme : "default";
+
+  const tier: string = profile.tier || "demo";
+  const canCaptureLeads =
+    (tier === "standard" || tier === "premium") && (profile.show_lead_form ?? true);
+  const hasContactDetails = !!(profile.phone_public || profile.email_public || canCaptureLeads);
+
+  // Midnight Glass Color Mode (exclusive to Premium)
+  const isGlassMode = profile.color_mode === "glass" && tier === "premium";
+
+  // Glass is a dark-only look. Force dark for the rest of the page (including the child
+  // components) and fall back to "system" if a non-premium account still has "glass" saved.
+  const effectiveColorMode = isGlassMode
+    ? "dark"
+    : profile.color_mode === "glass"
+    ? "system"
+    : profile.color_mode;
+
+  /* ---------------- Surface styles ---------------- */
+
+  const cardSurfaceClass = isGlassMode
+    ? "bg-gradient-to-b from-slate-900/90 via-indigo-950/90 to-slate-950/95 backdrop-blur-2xl border border-white/20 ring-1 ring-white/10 text-white shadow-2xl"
+    : "glass-card bg-white/70 dark:bg-dark-900/70 backdrop-blur-2xl shadow-2xl border border-white/50 dark:border-white/10 text-slate-900 dark:text-white";
+
+  const avatarBorderClass = isGlassMode
+    ? "border-slate-900"
+    : "border-white dark:border-[#14151a]";
+
+  const professionClass = isGlassMode
+    ? (THEME_TEXT[themeId] ?? THEME_TEXT.default).glass
+    : (THEME_TEXT[themeId] ?? THEME_TEXT.default).base;
+
+  const contactTileClass = isGlassMode
+    ? "bg-white/10 border-white/15 text-white"
+    : "bg-white/80 dark:bg-dark-950/60 border-slate-200/80 dark:border-white/10 text-slate-900 dark:text-white";
+
+  const phoneIconClass = isGlassMode
+    ? "bg-emerald-500/10 text-emerald-400"
+    : "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+
+  const mailIconClass = isGlassMode
+    ? "bg-brand-500/10 text-brand-300"
+    : "bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400";
+
+  const linkCardClass = isGlassMode
+    ? "bg-white/5 backdrop-blur-xl border-white/10 hover:border-white/30 hover:shadow-xl hover:shadow-black/30"
+    : "bg-white dark:bg-dark-900 border-slate-200 dark:border-white/10 hover:border-brand-300 dark:hover:border-brand-500/50 hover:shadow-xl hover:shadow-brand-500/10";
+
+  const linkIconBoxClass = isGlassMode
+    ? "bg-white/10 text-slate-200"
+    : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300";
+
+  const linkTitleClass = isGlassMode ? "text-white" : "text-slate-900 dark:text-white";
+  const linkSubClass = isGlassMode ? "text-slate-400" : "text-slate-500 dark:text-slate-400";
+  const linkArrowClass = isGlassMode
+    ? "text-slate-500 group-hover:text-white"
+    : "text-slate-300 dark:text-slate-600 group-hover:text-brand-500";
+
+  const dividerClass = isGlassMode ? "bg-white/10" : "bg-slate-200 dark:bg-white/10";
+  const sectionHeadingClass = isGlassMode ? "text-slate-400" : "text-slate-400 dark:text-slate-500";
+  const footerBorderClass = isGlassMode ? "border-white/10" : "border-slate-200/60 dark:border-white/5";
+  const footerTextClass = isGlassMode ? "text-slate-400" : "text-slate-500";
+  const footerPillClass = isGlassMode
+    ? "bg-white/10 text-slate-300 hover:text-white hover:bg-white/15"
+    : "bg-slate-200/50 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10";
+
+  const bannerAccent = THEME_BANNER_ACCENTS[themeId];
+
+  const isDemo = tier === "demo";
+
+  const verifiedBadge = (
+    <div className="absolute top-4 right-4 z-10 bg-black/30 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-mono text-white flex items-center gap-1.5 border border-white/20 shadow-sm">
+      <ShieldCheck className="w-3.5 h-3.5 text-accent-300" />
+      <span>{isDemo ? "KonekTap Demo" : "KonekTap Verified"}</span>
+    </div>
+  );
 
   return (
-    <main className={`min-h-screen relative selection:bg-brand-500/30 ${fontClass}`}>
-      <ProfileThemeOverride mode={profile.color_mode} />
+    <main
+      className={`min-h-screen relative selection:bg-brand-500/30 ${fontClass} ${
+        isGlassMode ? "dark" : ""
+      }`}
+    >
+      <ProfileThemeOverride mode={effectiveColorMode} />
       <ProfileTracker username={profile.username} />
-      
-      <div className="bg-slate-50 dark:bg-dark-950 min-h-screen absolute inset-0 -z-10" />
+
+      <div
+        className={`min-h-screen absolute inset-0 -z-10 ${
+          isGlassMode ? "bg-slate-950" : "bg-slate-50 dark:bg-dark-950"
+        }`}
+      />
       <div className="absolute top-0 w-full h-[500px] bg-gradient-to-b from-brand-500/10 via-brand-500/5 to-transparent pointer-events-none -z-10" />
-      
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-20 relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-700 ease-out">
-        <div className="flex flex-col lg:flex-row gap-8 lg:gap-12">
-          
+
+      {/* Background glow in Glass mode */}
+      {isGlassMode && (
+        <div
+          className={`absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full opacity-40 blur-[120px] pointer-events-none -z-10 ${
+            THEME_GLOWS[themeId] ?? THEME_GLOWS.default
+          }`}
+        />
+      )}
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-16 relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-700 ease-out">
+        <div className="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
+
           {/* LEFT COLUMN: Sticky Profile Card */}
-          <div className="w-full lg:w-[420px] shrink-0">
-            <div className={`lg:sticky lg:top-10 glass-card bg-white/70 dark:bg-dark-900/70 backdrop-blur-2xl shadow-2xl border border-white/50 dark:border-white/10 overflow-hidden flex flex-col ${shapeClass === 'rounded-none' ? 'rounded-none' : 'rounded-[2.5rem]'}`}>
-              
+          <div className="w-full lg:w-[420px] shrink-0 lg:sticky lg:top-8">
+            <div className={`${cardSurfaceClass} overflow-hidden flex flex-col ${shapeClass === "rounded-none" ? "rounded-none" : "rounded-[2.5rem]"}`}>
+
               {profile.banner_url ? (
                 <div className="w-full aspect-[21/9] relative bg-slate-900">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={profile.banner_url} alt="Cover" className="w-full h-full object-cover opacity-90" />
+                  <img src={profile.banner_url} alt="" className="w-full h-full object-cover opacity-90" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-                  <div className="absolute top-5 right-5 bg-black/30 backdrop-blur-md px-3.5 py-1.5 rounded-full text-[10px] font-mono text-white flex items-center gap-1.5 border border-white/20 shadow-sm z-10">
-                    <ShieldCheck className="w-3.5 h-3.5 text-accent-300" />
-                    <span>KonekTap Verified</span>
-                  </div>
+                  {verifiedBadge}
                 </div>
               ) : (
-                <div className={`w-full aspect-[21/9] relative ${THEME_BANNERS[profile.theme] || THEME_BANNERS.default}`}>
-                  <div className="absolute top-5 right-5 bg-black/30 backdrop-blur-md px-3.5 py-1.5 rounded-full text-[10px] font-mono text-white flex items-center gap-1.5 border border-white/20 shadow-sm">
-                    <ShieldCheck className="w-3.5 h-3.5 text-accent-300" />
-                    <span>KonekTap Verified</span>
-                  </div>
+                <div className={`w-full aspect-[21/9] relative overflow-hidden ${THEME_BANNERS[themeId]}`}>
+                  {bannerAccent && (
+                    <>
+                      <div className={`absolute inset-0 ${bannerAccent.glow}`} />
+                      <div
+                        className={`absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent to-transparent ${bannerAccent.line}`}
+                      />
+                    </>
+                  )}
+                  {verifiedBadge}
                 </div>
               )}
 
-              <div className="px-8 pb-10 flex-1 relative flex flex-col items-center text-center">
-                <div className="absolute -top-16">
+              <div className="px-6 sm:px-8 pb-8 flex-1 relative flex flex-col items-center text-center">
+                <div className="absolute -top-14">
                   <div className="relative group">
                     {profile.avatar_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img 
-                        src={profile.avatar_url} 
-                        alt={profile.full_name}
-                        className={`w-32 h-32 object-cover border-[6px] border-white dark:border-[#14151a] shadow-xl rotate-0 group-hover:rotate-3 transition-transform duration-300 bg-white ${shapeClass}`}
+                      <img
+                        src={profile.avatar_url}
+                        alt={profile.full_name || "Profile photo"}
+                        className={`w-28 h-28 object-cover border-[5px] ${avatarBorderClass} shadow-xl rotate-0 group-hover:rotate-3 transition-transform duration-300 bg-white ${shapeClass}`}
                       />
                     ) : (
-                      <div className={`w-32 h-32 bg-slate-100 dark:bg-slate-800 object-cover border-[6px] border-white dark:border-[#14151a] shadow-xl flex items-center justify-center text-5xl font-display font-bold text-slate-400 uppercase rotate-0 group-hover:rotate-3 transition-transform duration-300 ${shapeClass}`}>
+                      <div className={`w-28 h-28 bg-slate-100 dark:bg-slate-800 border-[5px] ${avatarBorderClass} shadow-xl flex items-center justify-center text-4xl font-display font-bold text-slate-400 uppercase rotate-0 group-hover:rotate-3 transition-transform duration-300 ${shapeClass}`}>
                         {profile.full_name?.charAt(0) || "U"}
                       </div>
                     )}
-                    <span className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-emerald-500 border-4 border-white dark:border-[#14151a] flex items-center justify-center text-white shadow-md">
-                      <CheckCircle2 className="w-4 h-4" />
+                    <span className={`absolute -bottom-1.5 -right-1.5 w-7 h-7 rounded-full bg-emerald-500 border-4 ${avatarBorderClass} flex items-center justify-center text-white shadow-md`}>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
                     </span>
                   </div>
                 </div>
 
-                <div className="pt-20 w-full flex flex-col items-center">
-                  <h1 className="font-display font-bold text-3xl md:text-4xl text-slate-900 dark:text-white tracking-tight">
+                <div className="pt-16 w-full flex flex-col items-center">
+                  <h1 className="font-display font-bold text-2xl md:text-3xl tracking-tight">
                     {profile.full_name}
                   </h1>
                   <CopyUsernameBadge username={profile.username} />
                   {profile.profession && (
-                    <p className="text-sm md:text-base font-semibold text-brand-600 dark:text-accent-400 mt-3">
+                    <p className={`text-sm font-semibold mt-2 ${professionClass}`}>
                       {profile.profession}
                     </p>
                   )}
                   {profile.bio && (
-                    <div className="mt-6 pt-6 border-t border-slate-200 dark:border-white/10 w-full">
-                      <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                    <div className="mt-4 pt-4 border-t border-slate-200/20 dark:border-white/10 w-full">
+                      <p className={`text-xs sm:text-sm leading-relaxed line-clamp-3 ${isGlassMode ? "text-slate-300" : "text-slate-600 dark:text-slate-400"}`}>
                         {profile.bio}
                       </p>
                     </div>
                   )}
 
-                  <div className="mt-8 w-full flex items-center gap-3">
-                    <TrackedVcardButton 
-                      username={profile.username} 
-                      className={`flex-1 py-4 px-6 font-semibold text-sm shadow-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${shapeClass} ${THEME_BUTTONS[profile.theme] || THEME_BUTTONS.default}`} 
+                  {/* Primary Action: Save to Contacts + QR */}
+                  <div className="mt-6 w-full flex items-center gap-2.5">
+                    <TrackedVcardButton
+                      username={profile.username}
+                      className={`flex-1 py-3.5 px-5 font-semibold text-sm shadow-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${shapeClass} ${THEME_BUTTONS[themeId]}`}
                     />
                     <ProfileQrModalButton username={profile.username} fullName={profile.full_name} />
                   </div>
+
+                  {/* Direct Contact Info & Inquire Trigger */}
+                  {hasContactDetails && (
+                    <div className="mt-5 pt-5 border-t border-slate-200/20 dark:border-white/10 w-full space-y-2.5 text-left">
+                      {profile.phone_public && (
+                        <a
+                          href={telHref(profile.phone_public)}
+                          className={`group p-3 ${contactTileClass} border hover:border-brand-400 transition-all flex items-center justify-between ${shapeClass}`}
+                        >
+                          <div className="flex items-center gap-3 overflow-hidden">
+                            <div className={`w-9 h-9 ${phoneIconClass} flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform ${shapeClass}`}>
+                              <Phone className="w-4 h-4" />
+                            </div>
+                            <div className="truncate">
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider leading-none mb-1">
+                                Mobile Phone
+                              </p>
+                              <p className="text-xs sm:text-sm font-semibold truncate">
+                                {profile.phone_public}
+                              </p>
+                            </div>
+                          </div>
+                          <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-brand-500 transition-colors shrink-0 ml-2" />
+                        </a>
+                      )}
+
+                      {profile.email_public && (
+                        <a
+                          href={mailHref(profile.email_public)}
+                          className={`group p-3 ${contactTileClass} border hover:border-brand-400 transition-all flex items-center justify-between ${shapeClass}`}
+                        >
+                          <div className="flex items-center gap-3 overflow-hidden">
+                            <div className={`w-9 h-9 ${mailIconClass} flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform ${shapeClass}`}>
+                              <Mail className="w-4 h-4" />
+                            </div>
+                            <div className="truncate">
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider leading-none mb-1">
+                                Email Address
+                              </p>
+                              <p className="text-xs sm:text-sm font-semibold truncate">
+                                {profile.email_public}
+                              </p>
+                            </div>
+                          </div>
+                          <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-brand-500 transition-colors shrink-0 ml-2" />
+                        </a>
+                      )}
+
+                      {/* Share Your Contact Info (lead capture) */}
+                      {canCaptureLeads && (
+                        <div className="pt-1">
+                          <PublicLeadAndContact
+                            profileId={profile.id}
+                            username={profile.username}
+                            publicPhone={null}
+                            publicEmail={null}
+                            showLeadForm={profile.show_lead_form ?? true}
+                            userTier={profile.tier || "demo"}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Contact Grid, Lead Form, Social Links, & Portfolio */}
-          <div className="flex-1 flex flex-col gap-8 lg:pt-6">
-            
-            <section>
-              <div className="flex items-center gap-4 mb-6">
-                <div className="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
-                <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Contact Information</h2>
-                <div className="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
-              </div>
+          {/* RIGHT COLUMN: Business Hub -> Featured Portfolio -> Social & Web Links */}
+          <div className="flex-1 w-full flex flex-col gap-8 lg:pt-2">
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-5">
-                {profile.phone_public && (
-                  <a href={`tel:${profile.phone_public.replace(/\s+/g, '')}`} className={`group p-1 bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 hover:border-brand-300 dark:hover:border-brand-500/50 shadow-sm hover:shadow-xl hover:shadow-brand-500/10 transition-all block ${shapeClass}`}>
-                    <div className="p-5 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-300 ${shapeClass}`}>
-                          <Phone className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase tracking-wider mb-0.5">Mobile Phone</p>
-                          <p className="text-sm md:text-base font-semibold text-slate-900 dark:text-white">{profile.phone_public}</p>
-                        </div>
-                      </div>
-                      <ArrowUpRight className="w-5 h-5 text-slate-300 dark:text-slate-600 group-hover:text-brand-500 transition-colors" />
-                    </div>
-                  </a>
-                )}
-                
-                {profile.email_public && (
-                  <a href={`mailto:${profile.email_public}`} className={`group p-1 bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 hover:border-brand-300 dark:hover:border-brand-500/50 shadow-sm hover:shadow-xl hover:shadow-brand-500/10 transition-all block ${shapeClass}`}>
-                    <div className="p-5 flex items-center justify-between overflow-hidden">
-                      <div className="flex items-center gap-4 overflow-hidden">
-                        <div className={`w-12 h-12 bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 ${shapeClass}`}>
-                          <Mail className="w-5 h-5" />
-                        </div>
-                        <div className="truncate">
-                          <p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase tracking-wider mb-0.5">Email Address</p>
-                          <p className="text-sm md:text-base font-semibold text-slate-900 dark:text-white truncate">{profile.email_public}</p>
-                        </div>
-                      </div>
-                      <ArrowUpRight className="w-5 h-5 text-slate-300 dark:text-slate-600 group-hover:text-brand-500 transition-colors shrink-0 ml-2" />
-                    </div>
-                  </a>
-                )}
-              </div>
+            {/* 1. Business Hub */}
+            <BusinessHubDisplay profile={profile} services={services || []} />
 
-              {/* IDINAGDAG NATIN DITO ANG LEAD CAPTURE FORM TRIGGER */}
-              <div className="mt-4">
-                <PublicLeadAndContact 
-                  profileId={profile.id}
-                  username={profile.username}
-                  publicPhone={profile.phone_public}
-                  publicEmail={profile.email_public}
-                  showLeadForm={profile.show_lead_form ?? true}
-                  userTier={profile.tier || "demo"}
-                />
-              </div>
-            </section>
+            {/* 2. Featured Portfolio (tier is passed to support filtering restrictions) */}
+            <PortfolioGallery items={portfolioItems || []} tier={profile.tier} />
 
-            {links && links.length > 0 && (
-              <section className="mt-4">
+            {/* 3. Social & Web Links */}
+            {safeLinks.length > 0 && (
+              <section className="mt-2">
                 <div className="flex items-center gap-4 mb-6">
-                  <div className="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
-                  <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Social & Web Links</h2>
-                  <div className="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
+                  <div className={`h-px flex-1 ${dividerClass}`}></div>
+                  <h2 className={`text-xs font-bold uppercase tracking-widest ${sectionHeadingClass}`}>
+                    Social & Web Links
+                  </h2>
+                  <div className={`h-px flex-1 ${dividerClass}`}></div>
                 </div>
-                
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-5">
-                  {links.map((link) => {
+                  {safeLinks.map((link) => {
                     const Icon = PLATFORM_ICONS[link.platform] || Globe;
-                    
+
                     return (
-                      <TrackedSocialLink key={link.id} link={link} className={`group p-1 bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 hover:border-brand-300 dark:hover:border-brand-500/50 shadow-sm hover:shadow-xl hover:shadow-brand-500/10 transition-all block ${shapeClass}`}>
+                      <TrackedSocialLink
+                        key={link.id}
+                        link={link}
+                        className={`group p-1 border shadow-sm transition-all block ${linkCardClass} ${shapeClass}`}
+                      >
                         <div className="p-5 flex items-center justify-between">
                           <div className="flex items-center gap-4 overflow-hidden">
-                            <div className={`w-12 h-12 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-300 ${shapeClass}`}>
+                            <div className={`w-12 h-12 flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-300 ${linkIconBoxClass} ${shapeClass}`}>
                               <Icon className="w-5 h-5" />
                             </div>
                             <div className="truncate">
-                              <p className="text-sm md:text-base font-semibold text-slate-900 dark:text-white truncate">{link.title}</p>
-                              <p className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 truncate uppercase tracking-wider mt-0.5">{link.platform}</p>
+                              <p className={`text-sm md:text-base font-semibold truncate ${linkTitleClass}`}>
+                                {link.title}
+                              </p>
+                              <p className={`text-[10px] md:text-xs truncate uppercase tracking-wider mt-0.5 ${linkSubClass}`}>
+                                {link.platform}
+                              </p>
                             </div>
                           </div>
-                          <ArrowUpRight className="w-5 h-5 text-slate-300 dark:text-slate-600 group-hover:text-brand-500 transition-colors shrink-0 ml-2" />
+                          <ArrowUpRight className={`w-5 h-5 transition-colors shrink-0 ml-2 ${linkArrowClass}`} />
                         </div>
                       </TrackedSocialLink>
-                    )
+                    );
                   })}
                 </div>
               </section>
             )}
 
-            <PortfolioGallery items={portfolioItems || []} />
-            
-            <div className="mt-12 pt-8 text-center md:text-left flex flex-col md:flex-row items-center justify-between gap-4">
-              <p className="text-xs text-slate-500 font-medium">
-                &copy; {new Date().getFullYear()} {profile.full_name}.
+            <div className={`mt-12 pt-8 text-center md:text-left flex flex-col md:flex-row items-center justify-between gap-4 border-t ${footerBorderClass}`}>
+              <p className={`text-xs font-medium ${footerTextClass}`}>
+                &copy; {new Date().getFullYear()} {profile.full_name || profile.username}.
               </p>
-              <Link href="/" className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-200/50 dark:bg-white/5 text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10 transition-colors uppercase tracking-widest">
+              <Link
+                href="/"
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-bold transition-colors uppercase tracking-widest ${footerPillClass}`}
+              >
                 <ShieldCheck className="w-3 h-3" />
                 KonekTap
               </Link>

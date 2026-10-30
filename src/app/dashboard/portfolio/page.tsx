@@ -37,7 +37,7 @@ async function PortfolioContent() {
       featureName="Portfolio & Work Gallery"
       description="Building a portfolio gallery and showcasing your work on your public card is available for Standard and Premium accounts."
     >
-      <PortfolioManager initialItems={portfolioItems || []} />
+      <PortfolioManager initialItems={portfolioItems || []} userTier={userTier} />
     </TierGate>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   CheckCircle2,
   Save,
@@ -22,6 +23,8 @@ import {
   QrCode,
   Copy,
   Check,
+  Lock,
+  Sparkles,
 } from "lucide-react";
 import { updateAppearance } from "@/app/dashboard/appearance/actions";
 import imageCompression from "browser-image-compression";
@@ -37,6 +40,7 @@ type AppearanceProfile = {
   banner_url?: string | null;
   full_name?: string | null;
   username?: string | null;
+  tier?: string | null;
   [key: string]: unknown;
 };
 
@@ -46,24 +50,49 @@ const THEMES = [
   { id: "midnight", name: "Midnight Gold", gradient: "bg-gradient-to-br from-slate-900 via-slate-800 to-zinc-900", text: "text-amber-500" },
   { id: "rose", name: "Crimson Rose", gradient: "bg-gradient-to-br from-rose-500 via-red-500 to-pink-600", text: "text-rose-500" },
   { id: "cyber", name: "Cyber Neon", gradient: "bg-gradient-to-br from-cyan-500 via-blue-600 to-purple-600", text: "text-cyan-500" },
+  { id: "amethyst", name: "Amethyst Aura", gradient: "bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600", text: "text-purple-500" },
 ];
 
+// Explicit font-family stacks ensure Mono, Serif, Sans, and Display look visibly distinct
 const FONTS = [
-  { id: "font-sans", name: "Modern (Sans)", class: "font-sans" },
-  { id: "font-serif", name: "Elegant (Serif)", class: "font-serif" },
-  { id: "font-mono", name: "Tech (Mono)", class: "font-mono" },
+  {
+    id: "font-sans",
+    name: "Modern (Sans)",
+    class: "font-sans",
+    style: { fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" },
+  },
+  {
+    id: "font-serif",
+    name: "Elegant (Serif)",
+    class: "font-serif",
+    style: { fontFamily: "ui-serif, Georgia, Cambria, 'Times New Roman', serif" },
+  },
+  {
+    id: "font-mono",
+    name: "Tech (Mono)",
+    class: "font-mono tracking-tight",
+    style: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace" },
+  },
+  {
+    id: "font-display",
+    name: "Geometric (Display)",
+    class: "font-display tracking-wide",
+    style: { fontFamily: "'Plus Jakarta Sans', 'Outfit', 'Inter', system-ui, sans-serif", letterSpacing: "0.02em" },
+  },
 ];
 
 const BUTTON_SHAPES = [
   { id: "rounded-full", name: "Pill", sample: "rounded-full" },
   { id: "rounded-2xl", name: "Rounded", sample: "rounded-xl" },
+  { id: "rounded-lg", name: "Soft Edge", sample: "rounded-md" },
   { id: "rounded-none", name: "Sharp", sample: "rounded-none" },
 ];
 
 const COLOR_MODES = [
-  { id: "system", name: "System (Auto)" },
-  { id: "light", name: "Always Light" },
-  { id: "dark", name: "Always Dark" },
+  { id: "system", name: "System (Auto)", premiumOnly: false },
+  { id: "light", name: "Always Light", premiumOnly: false },
+  { id: "dark", name: "Always Dark", premiumOnly: false },
+  { id: "glass", name: "Midnight Glass", premiumOnly: true },
 ];
 
 // Live Preview surfaces per color mode. Full class names are written out
@@ -117,6 +146,17 @@ const PREVIEW_SURFACES: Record<string, PreviewSurface> = {
     qrBtn:
       "bg-slate-100 border-slate-200 text-slate-700 dark:bg-white/5 dark:border-white/10 dark:text-white",
   },
+  glass: {
+    card: "bg-gradient-to-b from-slate-900/90 via-indigo-950/90 to-slate-950/95 backdrop-blur-2xl border-white/20 ring-1 ring-white/10",
+    avatarBorder: "border-white/20",
+    badgeBorder: "border-slate-900",
+    name: "text-white",
+    handle: "bg-white/10 text-indigo-200 border-white/15 backdrop-blur-md",
+    divider: "border-white/15",
+    bio: "text-slate-300",
+    primaryBtn: "bg-gradient-to-r from-brand-500 via-indigo-500 to-purple-500 text-white",
+    qrBtn: "bg-white/10 border-white/20 text-white backdrop-blur-md",
+  },
 };
 
 const MAX_BANNER_MB = 10;
@@ -129,6 +169,8 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     type: "success" | "error";
     message: string;
   } | null>(null);
+
+  const isPremium = profile?.tier === "premium";
 
   // Saved values (used to detect unsaved changes and for Reset)
   const initialTheme = profile?.theme || "default";
@@ -158,6 +200,7 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
 
   const isBusy = isPending || isCompressing;
   const currentTheme = THEMES.find((t) => t.id === selectedTheme) ?? THEMES[0];
+  const currentFont = FONTS.find((f) => f.id === fontStyle) ?? FONTS[0];
   const surface = PREVIEW_SURFACES[colorMode] ?? PREVIEW_SURFACES.system;
 
   // Real name and username for the preview, with fallbacks
@@ -303,11 +346,15 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     // Use the current form so the hidden inputs are included
     const formData = new FormData(e.currentTarget);
 
+    // Prevent non-premium users from saving the premium-only glass mode
+    const resolvedColorMode =
+      colorMode === "glass" && !isPremium ? "system" : colorMode;
+
     // Set the values from state
     formData.set("theme", selectedTheme);
     formData.set("font_style", fontStyle);
     formData.set("button_shape", buttonShape);
-    formData.set("color_mode", colorMode);
+    formData.set("color_mode", resolvedColorMode);
 
     if (removeBanner) {
       formData.set("remove_banner", "true");
@@ -582,16 +629,27 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
           </div>
           <div className="space-y-3">
             {FONTS.map((font) => (
-              <label key={font.id} className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="radio"
-                  name="font_style_option"
-                  checked={fontStyle === font.id}
-                  onChange={() => setFontStyle(font.id)}
-                  className="w-4 h-4 accent-amber-500 cursor-pointer"
-                />
-                <span className={`text-sm text-slate-700 dark:text-slate-200 ${font.class}`}>
-                  {font.name}
+              <label key={font.id} className="flex items-center justify-between gap-3 cursor-pointer">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="radio"
+                    name="font_style_option"
+                    checked={fontStyle === font.id}
+                    onChange={() => setFontStyle(font.id)}
+                    className="w-4 h-4 accent-amber-500 cursor-pointer"
+                  />
+                  <span
+                    style={font.style}
+                    className={`text-sm text-slate-700 dark:text-slate-200 ${font.class}`}
+                  >
+                    {font.name}
+                  </span>
+                </div>
+                <span
+                  style={font.style}
+                  className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400"
+                >
+                  Aa
                 </span>
               </label>
             ))}
@@ -641,20 +699,56 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
             </h3>
           </div>
           <div className="space-y-3">
-            {COLOR_MODES.map((mode) => (
-              <label key={mode.id} className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="radio"
-                  name="color_mode_option"
-                  checked={colorMode === mode.id}
-                  onChange={() => setColorMode(mode.id)}
-                  className="w-4 h-4 accent-purple-500 cursor-pointer"
-                />
-                <span className="text-sm text-slate-700 dark:text-slate-200">
-                  {mode.name}
-                </span>
-              </label>
-            ))}
+            {COLOR_MODES.map((mode) => {
+              const isLocked = mode.premiumOnly && !isPremium;
+              return (
+                <label
+                  key={mode.id}
+                  onClick={(e) => {
+                    if (isLocked) {
+                      e.preventDefault();
+                      setFeedback({
+                        type: "error",
+                        message: "Midnight Glass Color Mode is exclusive to the Premium plan.",
+                      });
+                    }
+                  }}
+                  className={`flex items-center justify-between gap-3 ${
+                    isLocked ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="radio"
+                      name="color_mode_option"
+                      checked={colorMode === mode.id}
+                      disabled={isLocked}
+                      onChange={() => {
+                        if (!isLocked) setColorMode(mode.id);
+                      }}
+                      className="w-4 h-4 accent-purple-500 cursor-pointer disabled:cursor-not-allowed"
+                    />
+                    <span className="text-sm text-slate-700 dark:text-slate-200">
+                      {mode.name}
+                    </span>
+                  </div>
+
+                  {mode.premiumOnly && (
+                    isLocked ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                        <Lock className="w-2.5 h-2.5" />
+                        Pro
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                        <Sparkles className="w-2.5 h-2.5" />
+                        Pro
+                      </span>
+                    )
+                  )}
+                </label>
+              );
+            })}
           </div>
         </fieldset>
       </div>
@@ -676,7 +770,8 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
         </div>
 
         <div
-          className={`max-w-sm mx-auto overflow-hidden border shadow-xl ${surface.card} ${fontStyle}`}
+          style={currentFont.style}
+          className={`max-w-sm mx-auto overflow-hidden border shadow-xl rounded-3xl ${surface.card} ${currentFont.class}`}
         >
           {/* Banner */}
           <div className={`relative h-28 ${currentTheme.gradient}`}>

@@ -16,11 +16,10 @@ async function BusinessHubContent() {
 
   if (!user) redirect("/login");
 
+  // GINAMIT NATIN ANG .select("*") PARA MAKUHA LAHAT NG BAGONG COLUMNS (Analytics, Cover URL, etc.)
   const { data: profile } = await supabase
     .from("profiles")
-    .select(
-      "tier, location_address, map_embed_url, booking_enabled, booking_url, catalog_title, catalog_pdf_url"
-    )
+    .select("*")
     .eq("id", user.id)
     .single();
 

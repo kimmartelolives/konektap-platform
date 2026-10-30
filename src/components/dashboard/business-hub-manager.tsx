@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useRef } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Briefcase,
@@ -17,6 +17,14 @@ import {
   Pencil,
   X,
   Check,
+  Video,
+  Phone,
+  Users,
+  Sparkles,
+  Download,
+  Eye,
+  MousePointerClick,
+  Wand2,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -47,16 +55,27 @@ interface BusinessHubManagerProps {
     map_embed_url?: string | null;
     booking_enabled?: boolean | null;
     booking_url?: string | null;
+    booking_title?: string | null;
+    booking_description?: string | null;
+    booking_platform?: string | null;
+    booking_clicks?: number | null;
     catalog_title?: string | null;
+    catalog_description?: string | null;
     catalog_pdf_url?: string | null;
+    catalog_cover_url?: string | null;
+    catalog_action_type?: string | null;
+    catalog_clicks?: number | null;
   };
 }
 
 type TabType = "services" | "map" | "appointments" | "catalog";
 
-/* ------------------------------------------------------------------ */
-/* Shared styles                                                       */
-/* ------------------------------------------------------------------ */
+const BOOKING_PLATFORMS = [
+  { id: "calendar", label: "Calendly / Cal.com", icon: Calendar },
+  { id: "video", label: "Zoom / Google Meet", icon: Video },
+  { id: "phone", label: "Phone / Discovery Call", icon: Phone },
+  { id: "inperson", label: "In-Person / Studio Visit", icon: Users },
+] as const;
 
 const inputClass =
   "w-full px-4 py-2.5 rounded-xl bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-sm text-slate-900 dark:text-white outline-none transition";
@@ -67,10 +86,6 @@ const editInputClass =
 const submitBtnClass =
   "w-full py-3 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-brand-600 dark:hover:bg-brand-500 font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed";
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
-
 const ALLOWED_MAP_PREFIXES = [
   "https://www.google.com/maps/embed",
   "https://maps.google.com/maps",
@@ -80,7 +95,6 @@ function isAllowedMapSrc(src: string): boolean {
   return ALLOWED_MAP_PREFIXES.some((prefix) => src.startsWith(prefix));
 }
 
-// Only plain http(s) links are allowed (blocks javascript:, data:, etc.)
 function isSafeHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -94,20 +108,16 @@ function isShortMapLink(value: string): boolean {
   return value.includes("maps.app.goo.gl") || value.includes("goo.gl/maps");
 }
 
-// Returns a valid Google Maps embed src from a pasted <iframe> or embed URL, else null
 function extractEmbedSrc(embedInput: string): string | null {
   const trimmed = embedInput.trim();
   if (!trimmed) return null;
 
-  // 1. If a full <iframe> code was pasted, pull out the src=""
   const iframeMatch = trimmed.match(/src=["']([^"']+)["']/i);
   const candidate = (iframeMatch?.[1] ?? trimmed).replace(/&amp;/g, "&");
 
-  // 2. Only accept real Google Maps embed URLs
   return isAllowedMapSrc(candidate) ? candidate : null;
 }
 
-// 3. Smart Search: fall back to searching the typed address directly in a Google Maps iframe
 function getResolvedMapSrc(
   embedInput: string,
   addressInput: string
@@ -134,17 +144,61 @@ function useDebouncedValue<T>(value: T, delay = 500): T {
   return debounced;
 }
 
-/* ------------------------------------------------------------------ */
-/* Component                                                           */
-/* ------------------------------------------------------------------ */
+function formatPriceDisplay(priceStr: string): string {
+  if (!priceStr) return "";
+  const trimmed = priceStr.trim();
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    return new Intl.NumberFormat("en-PH", {
+      style: "currency",
+      currency: "PHP",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(Number(trimmed));
+  }
+  return trimmed;
+}
+
+// Helper: Extract Google Drive File ID and convert to direct View, Download, or Thumbnail URL
+function formatGoogleDriveLink(
+  inputUrl: string,
+  mode: "view" | "download" | "image"
+): { url: string; wasConverted: boolean } {
+  const trimmed = inputUrl.trim();
+  if (!trimmed || !trimmed.includes("drive.google.com")) {
+    return { url: inputUrl, wasConverted: false };
+  }
+
+  const fileIdMatch =
+    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+
+  if (!fileIdMatch || !fileIdMatch[1]) {
+    return { url: inputUrl, wasConverted: false };
+  }
+
+  const fileId = fileIdMatch[1];
+  let formatted = trimmed;
+
+  if (mode === "download") {
+    formatted = `https://drive.google.com/uc?export=download&id=${fileId}`;
+  } else if (mode === "image") {
+    formatted = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
+  } else {
+    formatted = `https://drive.google.com/file/d/${fileId}/preview`;
+  }
+
+  return {
+    url: formatted,
+    wasConverted: formatted !== trimmed,
+  };
+}
 
 export function BusinessHubManager({
   initialServices,
   profile,
 }: BusinessHubManagerProps) {
   const router = useRouter();
-  const addFormRef = useRef<HTMLFormElement>(null);
-  const catalogFileRef = useRef<HTMLInputElement>(null);
 
   const [activeTab, setActiveTab] = useState<TabType>("services");
   const [services, setServices] = useState<ServiceItem[]>(initialServices);
@@ -155,14 +209,12 @@ export function BusinessHubManager({
     message: string;
   } | null>(null);
 
-  // Inline Edit State for Services
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  // Live Map Preview State
   const [locationAddress, setLocationAddress] = useState(
     profile?.location_address || ""
   );
@@ -170,21 +222,47 @@ export function BusinessHubManager({
     profile?.map_embed_url || ""
   );
 
-  // Debounce so the iframe doesn't reload on every keystroke
+  const [bookingEnabled, setBookingEnabled] = useState(
+    !!profile?.booking_enabled
+  );
+  const [bookingTitle, setBookingTitle] = useState(
+    profile?.booking_title || "Book an Appointment"
+  );
+  const [bookingDesc, setBookingDesc] = useState(
+    profile?.booking_description || ""
+  );
+  const [bookingPlatform, setBookingPlatform] = useState(
+    profile?.booking_platform || "calendar"
+  );
+
+  const [catalogTitle, setCatalogTitle] = useState(
+    profile?.catalog_title || "View Product Catalog / Menu"
+  );
+  const [catalogDesc, setCatalogDesc] = useState(
+    profile?.catalog_description || ""
+  );
+  const [catalogCoverUrl, setCatalogCoverUrl] = useState(
+    profile?.catalog_cover_url || ""
+  );
+  const [catalogPdfUrl, setCatalogPdfUrl] = useState(
+    profile?.catalog_pdf_url || ""
+  );
+  const [catalogActionType, setCatalogActionType] = useState<"view" | "download">(
+    profile?.catalog_action_type === "download" ? "download" : "view"
+  );
+  const [gdriveNotice, setGdriveNotice] = useState<string | null>(null);
+
   const debouncedAddress = useDebouncedValue(locationAddress, 600);
   const debouncedEmbed = useDebouncedValue(mapEmbedInput, 600);
 
-  // Prevent hydration mismatch with drag-and-drop library
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // Keep local list in sync when the server re-sends fresh data (after router.refresh())
   useEffect(() => {
     setServices(initialServices);
   }, [initialServices]);
 
-  // Auto-dismiss feedback banner
   useEffect(() => {
     if (!feedback) return;
     const timer = setTimeout(
@@ -213,6 +291,47 @@ export function BusinessHubManager({
     setFeedback(null);
     setEditingId(null);
     setConfirmDeleteId(null);
+    setGdriveNotice(null);
+  }
+
+  function handleCatalogActionChange(mode: "view" | "download") {
+    setCatalogActionType(mode);
+    if (catalogPdfUrl.includes("drive.google.com")) {
+      const { url } = formatGoogleDriveLink(catalogPdfUrl, mode);
+      setCatalogPdfUrl(url);
+      setGdriveNotice(
+        `Google Drive link auto-formatted for ${
+          mode === "download" ? "Direct Download" : "Instant Preview"
+        }!`
+      );
+    }
+  }
+
+  function handleCatalogPdfUrlChange(rawValue: string) {
+    const { url, wasConverted } = formatGoogleDriveLink(
+      rawValue,
+      catalogActionType
+    );
+    setCatalogPdfUrl(url);
+    if (wasConverted) {
+      setGdriveNotice(
+        `Google Drive sharing link automatically converted to ${
+          catalogActionType === "download"
+            ? "Direct Download"
+            : "Embed Preview"
+        } link!`
+      );
+    }
+  }
+
+  function handleCatalogCoverUrlChange(rawValue: string) {
+    const { url, wasConverted } = formatGoogleDriveLink(rawValue, "image");
+    setCatalogCoverUrl(url);
+    if (wasConverted) {
+      setGdriveNotice(
+        "Google Drive image link automatically converted to direct thumbnail URL!"
+      );
+    }
   }
 
   function startEditing(service: ServiceItem) {
@@ -249,18 +368,17 @@ export function BusinessHubManager({
   function handleAddService(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFeedback(null);
-
-    const formData = new FormData(e.currentTarget);
+    const formElement = e.currentTarget;
+    const formData = new FormData(formElement);
     formData.append("position", services.length.toString());
 
     startTransition(async () => {
       const result = await addService(formData);
       if (result?.error) {
-        // Form keeps what the user typed, so nothing is lost on error
         setFeedback({ type: "error", message: result.error });
         return;
       }
-      addFormRef.current?.reset();
+      formElement.reset();
       setFeedback({ type: "success", message: "Service added successfully!" });
       router.refresh();
     });
@@ -282,7 +400,6 @@ export function BusinessHubManager({
     formData.append("price", editPrice.trim());
     formData.append("description", editDescription.trim());
 
-    // Optimistic update, with a snapshot so we can roll back on failure
     const previous = services;
     setServices((prev) =>
       prev.map((item) =>
@@ -337,14 +454,12 @@ export function BusinessHubManager({
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    // Update local state position numbers immediately
     const updatedItems = items.map((item, index) => ({
       ...item,
       position: index,
     }));
     setServices(updatedItems);
 
-    // Persist new order in the database via Server Action
     startTransition(async () => {
       try {
         const res = (await updateServiceOrder(
@@ -372,7 +487,6 @@ export function BusinessHubManager({
     const formData = new FormData(e.currentTarget);
     const section = formData.get("section");
 
-    // Client-side checks (the server action should still validate these too)
     if (section === "map") {
       const embed = String(formData.get("map_embed_url") || "").trim();
       if (embed && isShortMapLink(embed)) {
@@ -420,9 +534,6 @@ export function BusinessHubManager({
       if (result?.error) {
         setFeedback({ type: "error", message: result.error });
       } else {
-        if (section === "catalog" && catalogFileRef.current) {
-          catalogFileRef.current.value = "";
-        }
         setFeedback({
           type: "success",
           message: "Business settings saved successfully!",
@@ -432,9 +543,60 @@ export function BusinessHubManager({
     });
   }
 
+  const SelectedBookingIcon =
+    BOOKING_PLATFORMS.find((p) => p.id === bookingPlatform)?.icon || Calendar;
+
+  const bookingClicks = profile?.booking_clicks ?? 0;
+  const catalogClicks = profile?.catalog_clicks ?? 0;
+
   return (
     <div className="space-y-6">
-      {/* HORIZONTAL TAB NAVIGATION */}
+      {/* CLICK & CONVERSION ANALYTICS SUMMARY */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="p-4 rounded-2xl bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Active Services
+            </p>
+            <p className="text-2xl font-display font-bold text-slate-900 dark:text-white mt-0.5">
+              {services.length}
+            </p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-brand-500/10 text-brand-600 dark:text-brand-400 flex items-center justify-center">
+            <Briefcase className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Appointment Clicks
+            </p>
+            <p className="text-2xl font-display font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+              {bookingClicks}
+            </p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+            <MousePointerClick className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Catalog / Menu Opens
+            </p>
+            <p className="text-2xl font-display font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">
+              {catalogClicks}
+            </p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+            <FileText className="w-5 h-5" />
+          </div>
+        </div>
+      </div>
+
+      {/* TAB NAVIGATION */}
       <div
         role="tablist"
         aria-label="Business hub sections"
@@ -463,7 +625,6 @@ export function BusinessHubManager({
         })}
       </div>
 
-      {/* STATUS FEEDBACK BANNER */}
       {feedback && (
         <div
           role={feedback.type === "error" ? "alert" : "status"}
@@ -494,7 +655,6 @@ export function BusinessHubManager({
       {activeTab === "services" && (
         <div className="space-y-6">
           <form
-            ref={addFormRef}
             onSubmit={handleAddService}
             className="glass-card p-6 rounded-3xl shadow-xl space-y-4 border border-slate-200 dark:border-white/10"
           >
@@ -528,7 +688,7 @@ export function BusinessHubManager({
                   name="price"
                   required
                   maxLength={40}
-                  placeholder="e.g. ₱15,000 or Starts at ₱1,500"
+                  placeholder="e.g. 15000 or Starts at ₱1,500"
                   className={inputClass}
                 />
               </div>
@@ -557,7 +717,6 @@ export function BusinessHubManager({
             </button>
           </form>
 
-          {/* DRAG AND DROP SERVICES LIST WITH INLINE EDIT */}
           <div className="space-y-2">
             {services.length > 0 && (
               <div className="flex items-center justify-between px-1">
@@ -610,7 +769,6 @@ export function BusinessHubManager({
                                 } transition-all`}
                               >
                                 {isEditing ? (
-                                  /* INLINE EDIT MODE (Enter = save, Esc = cancel) */
                                   <div
                                     className="space-y-3"
                                     onKeyDown={(e) =>
@@ -692,7 +850,6 @@ export function BusinessHubManager({
                                     </div>
                                   </div>
                                 ) : (
-                                  /* STANDARD DISPLAY MODE */
                                   <div className="flex items-center justify-between gap-4">
                                     <div className="flex items-center gap-3.5 overflow-hidden">
                                       <div
@@ -708,12 +865,12 @@ export function BusinessHubManager({
                                           <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
                                             {service.title}
                                           </h4>
-                                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-500/20">
-                                            {service.price}
+                                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+                                            {formatPriceDisplay(service.price)}
                                           </span>
                                         </div>
                                         {service.description && (
-                                          <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                                          <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 break-words">
                                             {service.description}
                                           </p>
                                         )}
@@ -787,7 +944,7 @@ export function BusinessHubManager({
         </div>
       )}
 
-      {/* TAB 2: LOCATION & INTERACTIVE MAP */}
+      {/* TAB 2: LOCATION & MAP */}
       {activeTab === "map" && (
         <form
           onSubmit={handleSaveSettings}
@@ -796,7 +953,7 @@ export function BusinessHubManager({
           <input type="hidden" name="section" value="map" />
           <div>
             <h3 className="font-bold text-slate-900 dark:text-white">
-              Interactive Map & Store Location
+              Store Location & Map
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Display your physical store, studio, or office address and an interactive Google Map on your card.
@@ -848,7 +1005,6 @@ export function BusinessHubManager({
             )}
           </div>
 
-          {/* LIVE GOOGLE MAP PREVIEW */}
           <div className="space-y-2 pt-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -906,128 +1062,313 @@ export function BusinessHubManager({
         </form>
       )}
 
-      {/* TAB 3: APPOINTMENT SCHEDULING */}
+      {/* TAB 3: APPOINTMENTS */}
       {activeTab === "appointments" && (
         <form
           onSubmit={handleSaveSettings}
           className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10"
         >
           <input type="hidden" name="section" value="appointments" />
-          <div>
-            <h3 className="font-bold text-slate-900 dark:text-white">
-              Appointment Scheduling
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Let clients book consultations, meetings, or reservations directly from your public card.
-            </p>
+          <input type="hidden" name="booking_platform" value={bookingPlatform} />
+
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">
+                Appointment & Consultation Card
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Customize a rich booking card so clients can schedule meetings, calls, or reservations directly from your profile.
+              </p>
+            </div>
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5">
+              <MousePointerClick className="w-4 h-4" />
+              <span>{bookingClicks} Total Booking Clicks</span>
+            </div>
           </div>
 
           <label className="flex items-center gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 cursor-pointer">
             <input
               type="checkbox"
               name="booking_enabled"
-              defaultChecked={!!profile?.booking_enabled}
+              checked={bookingEnabled}
+              onChange={(e) => setBookingEnabled(e.target.checked)}
               className="w-4 h-4 accent-brand-600 rounded"
             />
             <div>
               <p className="text-sm font-bold text-slate-900 dark:text-white">
-                Enable Appointment Booking Button
+                Show Booking Card on Public Profile
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Displays a prominent "Book an Appointment" CTA on your public profile.
+                Displays a dedicated interactive booking card on your KonekTap profile.
               </p>
             </div>
           </label>
 
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Meeting / Booking Type Icon
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              {BOOKING_PLATFORMS.map((platform) => {
+                const Icon = platform.icon;
+                const isSelected = bookingPlatform === platform.id;
+                return (
+                  <button
+                    key={platform.id}
+                    type="button"
+                    onClick={() => setBookingPlatform(platform.id)}
+                    className={`p-3 rounded-2xl border text-left transition-all flex flex-col gap-2 cursor-pointer ${
+                      isSelected
+                        ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400 shadow-sm"
+                        : "border-slate-200 dark:border-white/10 bg-white dark:bg-dark-950 text-slate-600 dark:text-slate-400 hover:border-slate-300"
+                    }`}
+                  >
+                    <Icon className="w-5 h-5" />
+                    <span className="text-xs font-bold leading-tight">
+                      {platform.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Card Headline / CTA Title
+              </label>
+              <input
+                name="booking_title"
+                maxLength={60}
+                value={bookingTitle}
+                onChange={(e) => setBookingTitle(e.target.value)}
+                placeholder="e.g. Schedule a Free 15-Min Discovery Call"
+                className={inputClass}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Booking / Calendar URL
+              </label>
+              <input
+                name="booking_url"
+                type="url"
+                defaultValue={profile?.booking_url || ""}
+                placeholder="https://calendly.com/your-username"
+                className={inputClass}
+              />
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Booking / Calendar URL (Calendly, Cal.com, Google Calendar, or Form)
+              Short Subtext / Expectations (Optional)
             </label>
-            <input
-              name="booking_url"
-              type="url"
-              defaultValue={profile?.booking_url || ""}
-              placeholder="https://calendly.com/your-username"
+            <textarea
+              name="booking_description"
+              rows={2}
+              maxLength={160}
+              value={bookingDesc}
+              onChange={(e) => setBookingDesc(e.target.value)}
+              placeholder="e.g. Pick a time slot that works best for you to discuss your project requirements and quotation."
               className={inputClass}
             />
           </div>
 
+          <div className="space-y-2 pt-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Live Public Card Preview
+            </span>
+            <div className="p-5 rounded-3xl bg-white dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 border border-slate-200 dark:border-white/15 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all">
+              <div className="flex items-start gap-4 flex-1 min-w-0">
+                <div className="w-12 h-12 rounded-2xl bg-brand-50 dark:bg-brand-500/20 border border-brand-100 dark:border-brand-400/30 text-brand-600 dark:text-brand-300 flex items-center justify-center shrink-0">
+                  <SelectedBookingIcon className="w-6 h-6" />
+                </div>
+                <div className="space-y-1 flex-1 min-w-0">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
+                    <Sparkles className="w-3 h-3 shrink-0" />
+                    Available for Booking
+                  </div>
+                  <h4 className="font-bold text-base text-slate-900 dark:text-white line-clamp-2 break-words">
+                    {bookingTitle || "Book an Appointment"}
+                  </h4>
+                  {bookingDesc && (
+                    <p className="text-xs text-slate-500 dark:text-slate-300 leading-relaxed line-clamp-2 break-words max-w-md">
+                      {bookingDesc}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <span className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs shrink-0 shadow-md transition-colors">
+                Schedule Now →
+              </span>
+            </div>
+          </div>
+
           <button type="submit" disabled={isPending} className={submitBtnClass}>
             {isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-            {isPending ? "Saving Booking Settings..." : "Save Appointment Settings"}
+            {isPending
+              ? "Saving Booking Settings..."
+              : "Save Appointment Settings"}
           </button>
         </form>
       )}
 
-      {/* TAB 4: PDF CATALOG / MENU VIEWER */}
+      {/* TAB 4: PDF CATALOG / MENU WITH GOOGLE DRIVE AUTO-FORMATTER */}
       {activeTab === "catalog" && (
         <form
           onSubmit={handleSaveSettings}
           className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10"
         >
           <input type="hidden" name="section" value="catalog" />
-          <div>
-            <h3 className="font-bold text-slate-900 dark:text-white">
-              PDF Catalog / Digital Menu Viewer
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Upload a PDF brochure, restaurant menu, or product catalog for visitors to view or download.
+          <input
+            type="hidden"
+            name="catalog_action_type"
+            value={catalogActionType}
+          />
+
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">
+                Featured Catalog / Digital Menu Showcase
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Add a visual cover image and a direct link to your PDF brochure, restaurant menu, or rate sheet.
+              </p>
+            </div>
+            <div className="px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center gap-1.5">
+              <MousePointerClick className="w-4 h-4" />
+              <span>{catalogClicks} Total Catalog Opens</span>
+            </div>
+          </div>
+
+          {gdriveNotice && (
+            <div className="p-3.5 rounded-2xl bg-brand-500/10 border border-brand-500/20 text-brand-700 dark:text-brand-300 text-xs font-semibold flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Wand2 className="w-4 h-4 shrink-0" />
+                <span>{gdriveNotice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGdriveNotice(null)}
+                className="p-1 opacity-70 hover:opacity-100 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Catalog / Menu Title
+              </label>
+              <input
+                name="catalog_title"
+                maxLength={60}
+                value={catalogTitle}
+                onChange={(e) => setCatalogTitle(e.target.value)}
+                placeholder="e.g. 2026 Product Catalog & Price List"
+                className={inputClass}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Primary Button Action
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleCatalogActionChange("view")}
+                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                    catalogActionType === "view"
+                      ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400"
+                      : "border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  <Eye className="w-4 h-4" />
+                  Open & View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCatalogActionChange("download")}
+                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                    catalogActionType === "download"
+                      ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400"
+                      : "border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  <Download className="w-4 h-4" />
+                  Direct Download
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Short Description (Optional)
+            </label>
+            <textarea
+              name="catalog_description"
+              rows={2}
+              maxLength={160}
+              value={catalogDesc}
+              onChange={(e) => setCatalogDesc(e.target.value)}
+              placeholder="e.g. Browse our complete menu, custom packages, and bulk pricing specifications."
+              className={inputClass}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Cover Image URL (Supports Google Drive Image Share Links, Imgur, etc.)
+            </label>
+            <input
+              name="catalog_cover_url"
+              type="url"
+              value={catalogCoverUrl}
+              onChange={(e) => handleCatalogCoverUrlChange(e.target.value)}
+              placeholder="Paste Google Drive image link or direct image URL..."
+              className={inputClass}
+            />
+            <p className="text-[11px] text-slate-400">
+              Tip: Paste any public Google Drive image link and it will automatically convert into a direct thumbnail URL.
             </p>
           </div>
 
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Button / Section Title
-            </label>
-            <input
-              name="catalog_title"
-              maxLength={60}
-              defaultValue={
-                profile?.catalog_title || "View Product Catalog / Menu"
-              }
-              placeholder="e.g. Download Our 2026 Product Catalog"
-              className={inputClass}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Upload PDF File
-            </label>
-            <input
-              ref={catalogFileRef}
-              type="file"
-              name="catalog_file"
-              accept="application/pdf"
-              className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-brand-500/10 file:text-brand-600 hover:file:bg-brand-500/20 file:cursor-pointer"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Or Direct PDF / Catalog Link
+              PDF / Catalog Link (Auto-Formats Google Drive Links)
             </label>
             <input
               name="catalog_pdf_url"
               type="url"
-              defaultValue={profile?.catalog_pdf_url || ""}
-              placeholder="https://example.com/menu.pdf"
+              value={catalogPdfUrl}
+              onChange={(e) => handleCatalogPdfUrlChange(e.target.value)}
+              placeholder="Paste Google Drive PDF share link or direct PDF URL..."
               className={inputClass}
             />
+            <p className="text-[11px] text-slate-400">
+              Tip: Upload your PDF to Google Drive (set access to <strong>Anyone with the link</strong>) and paste the link here—we auto-convert it for instant viewing or direct download.
+            </p>
           </div>
 
-          {profile?.catalog_pdf_url && isSafeHttpUrl(profile.catalog_pdf_url) && (
-            <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10">
-              <span className="text-xs text-slate-600 dark:text-slate-300 truncate">
-                Active Catalog: {profile.catalog_pdf_url}
+          {catalogPdfUrl && isSafeHttpUrl(catalogPdfUrl) && (
+            <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300 truncate">
+                Resolved Link: {catalogPdfUrl}
               </span>
               <a
-                href={profile.catalog_pdf_url}
+                href={catalogPdfUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline shrink-0"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline shrink-0"
               >
-                <span>Preview</span>
+                <span>Test Link</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
             </div>

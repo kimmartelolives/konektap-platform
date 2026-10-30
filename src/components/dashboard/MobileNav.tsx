@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-// 1. Idinagdag ang 'Inbox' dito sa import:
+import { usePathname } from "next/navigation";
 import { Menu, X, Wifi, User, Link as LinkIcon, Image, Palette, CreditCard, BarChart, LogOut, Lock, Inbox, Briefcase } from "lucide-react";
 import { AccountTier, TIER_CONFIG, hasTierAccess } from "./TierGate";
 
@@ -13,8 +13,9 @@ interface MobileNavProps {
 
 export default function MobileNav({ userEmail, userTier = "demo" }: MobileNavProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const pathname = usePathname();
 
-const navLinks: Array<{ name: string; href: string; icon: any; minTier?: AccountTier }> = [
+  const navLinks: Array<{ name: string; href: string; icon: any; minTier?: AccountTier }> = [
     { name: "Overview", href: "/dashboard", icon: BarChart },
     { name: "Profile Info", href: "/dashboard/profile", icon: User },
     { name: "Social Links", href: "/dashboard/links", icon: LinkIcon },
@@ -57,16 +58,21 @@ const navLinks: Array<{ name: string; href: string; icon: any; minTier?: Account
             {navLinks.map((link) => {
               const Icon = link.icon;
               const isLocked = link.minTier ? !hasTierAccess(userTier, link.minTier) : false;
+              const isActive = pathname === link.href;
 
               return (
                 <Link
                   key={link.name}
                   href={link.href}
                   onClick={() => setIsOpen(false)}
-                  className="flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition"
+                  className={`flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-medium transition ${
+                    isActive
+                      ? "bg-brand-500/10 text-brand-600 dark:text-brand-400 font-semibold shadow-sm"
+                      : "text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5"
+                  }`}
                 >
                   <div className="flex items-center gap-3">
-                    <Icon className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+                    <Icon className={`w-4 h-4 ${isActive ? "text-brand-600 dark:text-brand-400" : "text-brand-600 dark:text-brand-400"}`} />
                     <span>{link.name}</span>
                   </div>
                   {isLocked && <Lock className="w-3.5 h-3.5 text-slate-400" />}
