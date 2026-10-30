@@ -146,7 +146,7 @@ export function ProfileForm({ profile }: { profile: any }) {
             required
             pattern="[a-zA-Z0-9_]+"
             title="Only letters, numbers, and underscores allowed"
-            placeholder="kimmartelolives"
+            placeholder="juandelacruz"
             className="flex-1 px-4 py-3 bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 rounded-r-xl focus:border-brand-500 outline-none text-slate-900 dark:text-white font-mono transition-colors" 
           />
         </div>
