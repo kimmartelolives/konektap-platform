@@ -2,7 +2,6 @@
 
 import { useState, useTransition, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   CheckCircle2,
   Save,
@@ -25,6 +24,7 @@ import {
   Check,
   Lock,
   Sparkles,
+  Info,
 } from "lucide-react";
 import { updateAppearance } from "@/app/dashboard/appearance/actions";
 import imageCompression from "browser-image-compression";
@@ -44,48 +44,136 @@ type AppearanceProfile = {
   [key: string]: unknown;
 };
 
+/* ---------------- Static config (mirrors the public profile page) ---------------- */
+
 const THEMES = [
-  { id: "default", name: "KonekTap Signature", gradient: "bg-gradient-to-br from-brand-600 via-indigo-600 to-accent-500", text: "text-indigo-500" },
-  { id: "emerald", name: "Emerald Minimal", gradient: "bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700", text: "text-emerald-500" },
-  { id: "midnight", name: "Midnight Gold", gradient: "bg-gradient-to-br from-slate-900 via-slate-800 to-zinc-900", text: "text-amber-500" },
-  { id: "rose", name: "Crimson Rose", gradient: "bg-gradient-to-br from-rose-500 via-red-500 to-pink-600", text: "text-rose-500" },
-  { id: "cyber", name: "Cyber Neon", gradient: "bg-gradient-to-br from-cyan-500 via-blue-600 to-purple-600", text: "text-cyan-500" },
-  { id: "amethyst", name: "Amethyst Aura", gradient: "bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600", text: "text-purple-500" },
+  {
+    id: "default",
+    name: "KonekTap Signature",
+    gradient: "bg-gradient-to-br from-brand-600 via-indigo-600 to-accent-500",
+    text: "text-brand-600 dark:text-accent-400",
+    glassText: "text-accent-400",
+    button: "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-brand-500/25",
+    glow: "bg-gradient-to-br from-brand-500 via-indigo-500 to-accent-500",
+  },
+  {
+    id: "executive",
+    name: "Executive Pearl",
+    gradient: "bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 border border-slate-200",
+    text: "text-indigo-600 dark:text-indigo-400",
+    glassText: "text-indigo-300",
+    button: "bg-indigo-600 text-white shadow-indigo-500/25",
+    glow: "bg-gradient-to-br from-blue-400 via-indigo-500 to-slate-400",
+  },
+  {
+    id: "corporate",
+    name: "Corporate Obsidian",
+    gradient: "bg-gradient-to-br from-slate-900 via-zinc-900 to-slate-950 border border-slate-700",
+    text: "text-slate-700 dark:text-slate-300",
+    glassText: "text-slate-300",
+    button: "bg-slate-800 text-white shadow-slate-900/25 border border-slate-700",
+    glow: "bg-gradient-to-br from-slate-700 via-indigo-900 to-slate-950",
+  },
+  {
+    id: "luxe",
+    name: "Golden Luxe",
+    gradient: "bg-gradient-to-br from-amber-600 via-yellow-700 to-stone-900",
+    text: "text-amber-600 dark:text-amber-400",
+    glassText: "text-amber-300",
+    button: "bg-amber-500 text-slate-950 shadow-amber-500/25",
+    glow: "bg-gradient-to-br from-amber-500 via-yellow-600 to-stone-900",
+  },
+  {
+    id: "emerald",
+    name: "Emerald Minimal",
+    gradient: "bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700",
+    text: "text-emerald-600 dark:text-emerald-400",
+    glassText: "text-emerald-400",
+    button: "bg-emerald-600 text-white shadow-emerald-500/25",
+    glow: "bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-500",
+  },
+  {
+    id: "midnight",
+    name: "Midnight Gold",
+    gradient: "bg-gradient-to-br from-slate-950 via-slate-800 to-zinc-900",
+    text: "text-amber-600 dark:text-amber-400",
+    glassText: "text-amber-400",
+    button: "bg-amber-500 text-slate-900 shadow-amber-500/25",
+    glow: "bg-gradient-to-br from-amber-500 via-indigo-600 to-purple-700",
+  },
+  {
+    id: "rose",
+    name: "Crimson Rose",
+    gradient: "bg-gradient-to-br from-rose-500 via-red-500 to-pink-600",
+    text: "text-rose-600 dark:text-rose-400",
+    glassText: "text-rose-400",
+    button: "bg-rose-600 text-white shadow-rose-500/25",
+    glow: "bg-gradient-to-br from-rose-500 via-red-500 to-pink-500",
+  },
+  {
+    id: "cyber",
+    name: "Cyber Neon",
+    gradient: "bg-gradient-to-br from-cyan-500 via-blue-600 to-purple-600",
+    text: "text-cyan-600 dark:text-cyan-400",
+    glassText: "text-cyan-400",
+    button: "bg-cyan-500 text-slate-900 shadow-cyan-500/25",
+    glow: "bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-500",
+  },
+  {
+    id: "amethyst",
+    name: "Amethyst Aura",
+    gradient: "bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600",
+    text: "text-violet-600 dark:text-violet-400",
+    glassText: "text-violet-400",
+    button: "bg-purple-600 text-white shadow-purple-500/25",
+    glow: "bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500",
+  },
 ];
 
-// Explicit font-family stacks ensure Mono, Serif, Sans, and Display look visibly distinct
 const FONTS = [
   {
     id: "font-sans",
     name: "Modern (Sans)",
     class: "font-sans",
     style: { fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" },
+    premiumOnly: false,
   },
   {
     id: "font-serif",
     name: "Elegant (Serif)",
     class: "font-serif",
     style: { fontFamily: "ui-serif, Georgia, Cambria, 'Times New Roman', serif" },
+    premiumOnly: false,
   },
   {
     id: "font-mono",
     name: "Tech (Mono)",
     class: "font-mono tracking-tight",
     style: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace" },
+    premiumOnly: false,
   },
   {
     id: "font-display",
     name: "Geometric (Display)",
     class: "font-display tracking-wide",
     style: { fontFamily: "'Plus Jakarta Sans', 'Outfit', 'Inter', system-ui, sans-serif", letterSpacing: "0.02em" },
+    premiumOnly: false,
+  },
+  {
+    id: "font-futura",
+    name: "Futura",
+    class: "tracking-wide",
+    style: { fontFamily: "Futura, 'Futura PT', 'Jost', 'Century Gothic', 'Trebuchet MS', sans-serif" },
+    premiumOnly: true,
   },
 ];
 
 const BUTTON_SHAPES = [
-  { id: "rounded-full", name: "Pill", sample: "rounded-full" },
-  { id: "rounded-2xl", name: "Rounded", sample: "rounded-xl" },
-  { id: "rounded-lg", name: "Soft Edge", sample: "rounded-md" },
-  { id: "rounded-none", name: "Sharp", sample: "rounded-none" },
+  { id: "rounded-full", name: "Pill", sample: "rounded-full", premiumOnly: false },
+  { id: "rounded-2xl", name: "Rounded", sample: "rounded-2xl", premiumOnly: false },
+  { id: "rounded-lg", name: "Soft Edge", sample: "rounded-md", premiumOnly: false },
+  { id: "rounded-none", name: "Sharp", sample: "rounded-none", premiumOnly: false },
+  { id: "rounded-[32px]", name: "Super Oval", sample: "rounded-[32px]", premiumOnly: true },
 ];
 
 const COLOR_MODES = [
@@ -93,10 +181,9 @@ const COLOR_MODES = [
   { id: "light", name: "Always Light", premiumOnly: false },
   { id: "dark", name: "Always Dark", premiumOnly: false },
   { id: "glass", name: "Midnight Glass", premiumOnly: true },
+  { id: "business-glass", name: "Corporate Frosted", premiumOnly: true },
 ];
 
-// Live Preview surfaces per color mode. Full class names are written out
-// so Tailwind can detect them.
 type PreviewSurface = {
   card: string;
   avatarBorder: string;
@@ -105,20 +192,18 @@ type PreviewSurface = {
   handle: string;
   divider: string;
   bio: string;
-  primaryBtn: string;
   qrBtn: string;
 };
 
 const PREVIEW_SURFACES: Record<string, PreviewSurface> = {
   dark: {
-    card: "bg-[#0f1421] border-white/10",
+    card: "bg-[#0f1421] border-white/10 dark",
     avatarBorder: "border-[#171c28]",
     badgeBorder: "border-[#0f1421]",
     name: "text-white",
     handle: "bg-white/5 text-slate-400 border-white/5",
     divider: "border-white/10",
     bio: "text-slate-400",
-    primaryBtn: "bg-white text-slate-900",
     qrBtn: "bg-white/5 border-white/10 text-white",
   },
   light: {
@@ -129,7 +214,6 @@ const PREVIEW_SURFACES: Record<string, PreviewSurface> = {
     handle: "bg-slate-100 text-slate-500 border-slate-200",
     divider: "border-slate-200",
     bio: "text-slate-500",
-    primaryBtn: "bg-slate-900 text-white",
     qrBtn: "bg-slate-100 border-slate-200 text-slate-700",
   },
   system: {
@@ -141,25 +225,114 @@ const PREVIEW_SURFACES: Record<string, PreviewSurface> = {
       "bg-slate-100 text-slate-500 border-slate-200 dark:bg-white/5 dark:text-slate-400 dark:border-white/5",
     divider: "border-slate-200 dark:border-white/10",
     bio: "text-slate-500 dark:text-slate-400",
-    primaryBtn:
-      "bg-slate-900 text-white dark:bg-white dark:text-slate-900",
     qrBtn:
       "bg-slate-100 border-slate-200 text-slate-700 dark:bg-white/5 dark:border-white/10 dark:text-white",
   },
   glass: {
-    card: "bg-gradient-to-b from-slate-900/90 via-indigo-950/90 to-slate-950/95 backdrop-blur-2xl border-white/20 ring-1 ring-white/10",
-    avatarBorder: "border-white/20",
+    card: "bg-gradient-to-b from-slate-900/90 via-indigo-950/90 to-slate-950/95 backdrop-blur-2xl border-white/20 ring-1 ring-white/10 text-white",
+    avatarBorder: "border-slate-900",
     badgeBorder: "border-slate-900",
     name: "text-white",
     handle: "bg-white/10 text-indigo-200 border-white/15 backdrop-blur-md",
     divider: "border-white/15",
     bio: "text-slate-300",
-    primaryBtn: "bg-gradient-to-r from-brand-500 via-indigo-500 to-purple-500 text-white",
     qrBtn: "bg-white/10 border-white/20 text-white backdrop-blur-md",
+  },
+  "business-glass": {
+    card: "bg-white/70 backdrop-blur-xl border-slate-200/70 ring-1 ring-white/70 text-slate-900 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.35)]",
+    avatarBorder: "border-white",
+    badgeBorder: "border-white",
+    name: "text-slate-900",
+    handle: "bg-slate-100 text-slate-700 border-slate-200",
+    divider: "border-slate-200",
+    bio: "text-slate-600",
+    qrBtn: "bg-slate-100 border-slate-200 text-slate-700",
   },
 };
 
 const MAX_BANNER_MB = 10;
+const SUPER_OVAL = "rounded-[32px]";
+
+/* ---------------- Small shared components ---------------- */
+
+function PremiumBadge({ locked }: { locked: boolean }) {
+  return locked ? (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 shadow-xs">
+      <Lock className="w-2.5 h-2.5" /> PREMIUM
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gradient-to-r from-amber-500/20 to-yellow-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 shadow-xs">
+      <Sparkles className="w-2.5 h-2.5 text-amber-500" /> PREMIUM
+    </span>
+  );
+}
+
+type ChoiceRowProps = {
+  name: string;
+  label: string;
+  checked: boolean;
+  locked: boolean;
+  premium: boolean;
+  accentClass: string;
+  onSelect: () => void;
+  onLockedClick: () => void;
+  labelClassName?: string;
+  labelStyle?: React.CSSProperties;
+  trailing?: React.ReactNode;
+};
+
+function ChoiceRow({
+  name,
+  label,
+  checked,
+  locked,
+  premium,
+  accentClass,
+  onSelect,
+  onLockedClick,
+  labelClassName = "",
+  labelStyle,
+  trailing,
+}: ChoiceRowProps) {
+  return (
+    <label
+      onClick={(e) => {
+        if (locked) {
+          e.preventDefault();
+          onLockedClick();
+        }
+      }}
+      className={`flex items-center justify-between gap-3 ${
+        locked ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <input
+          type="radio"
+          name={name}
+          checked={checked}
+          disabled={locked}
+          onChange={() => {
+            if (!locked) onSelect();
+          }}
+          className={`w-4 h-4 cursor-pointer disabled:cursor-not-allowed ${accentClass}`}
+        />
+        <span
+          style={labelStyle}
+          className={`text-sm text-slate-700 dark:text-slate-200 ${labelClassName}`}
+        >
+          {label}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        {trailing}
+        {premium && <PremiumBadge locked={locked} />}
+      </div>
+    </label>
+  );
+}
+
+/* ---------------- Main component ---------------- */
 
 export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
   const router = useRouter();
@@ -172,9 +345,11 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
 
   const isPremium = profile?.tier === "premium";
 
-  // Saved values (used to detect unsaved changes and for Reset)
   const initialTheme = profile?.theme || "default";
-  const initialFont = profile?.font_style || "font-sans";
+  const initialFont =
+    profile?.font_style === "font-editorial"
+      ? "font-futura"
+      : profile?.font_style || "font-sans";
   const initialShape = profile?.button_shape || "rounded-2xl";
   const initialMode = profile?.color_mode || "system";
 
@@ -183,14 +358,12 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
   const [buttonShape, setButtonShape] = useState(initialShape);
   const [colorMode, setColorMode] = useState(initialMode);
 
-  // Banner States
   const [bannerPreview, setBannerPreview] = useState<string | null>(
     profile?.banner_url || null
   );
   const [removeBanner, setRemoveBanner] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Cropping States
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -199,11 +372,43 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
   const [isCropping, setIsCropping] = useState(false);
 
   const isBusy = isPending || isCompressing;
-  const currentTheme = THEMES.find((t) => t.id === selectedTheme) ?? THEMES[0];
-  const currentFont = FONTS.find((f) => f.id === fontStyle) ?? FONTS[0];
-  const surface = PREVIEW_SURFACES[colorMode] ?? PREVIEW_SURFACES.system;
 
-  // Real name and username for the preview, with fallbacks
+  /* What the public page will really render: premium-only choices fall back
+     for non-premium accounts, so the preview must do the same. */
+  const isModeRestricted =
+    (colorMode === "glass" || colorMode === "business-glass") && !isPremium;
+  const isFontRestricted =
+    !!FONTS.find((f) => f.id === fontStyle)?.premiumOnly && !isPremium;
+  const isShapeRestricted = buttonShape === SUPER_OVAL && !isPremium;
+
+  const effectiveMode = isModeRestricted ? "system" : colorMode;
+  const effectiveFont = isFontRestricted ? "font-sans" : fontStyle;
+  const effectiveShape = isShapeRestricted ? "rounded-2xl" : buttonShape;
+
+  const fallbackNotes = [
+    isModeRestricted ? "this color mode" : null,
+    isFontRestricted ? "this font" : null,
+    isShapeRestricted ? "this button shape" : null,
+  ].filter(Boolean) as string[];
+
+  const currentTheme = THEMES.find((t) => t.id === selectedTheme) ?? THEMES[0];
+  const currentFont = FONTS.find((f) => f.id === effectiveFont) ?? FONTS[0];
+  const surface = PREVIEW_SURFACES[effectiveMode] ?? PREVIEW_SURFACES.system;
+
+  const isGlass = effectiveMode === "glass";
+  const isFrosted = effectiveMode === "business-glass";
+
+  const professionClass = isGlass ? currentTheme.glassText : currentTheme.text;
+  const primaryBtnClass = isFrosted
+    ? "bg-slate-900 text-white shadow-slate-900/20"
+    : currentTheme.button;
+
+  const stageClass = isGlass
+    ? "bg-slate-950 border-white/10"
+    : isFrosted
+    ? "bg-gradient-to-br from-slate-100 via-slate-50 to-blue-100 border-slate-200"
+    : "bg-slate-900/5 dark:bg-dark-950/50 border-slate-200/60 dark:border-white/5";
+
   const previewName =
     typeof profile?.full_name === "string" && profile.full_name.trim()
       ? profile.full_name.trim()
@@ -221,8 +426,6 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     colorMode !== initialMode ||
     croppedBlob !== null ||
     removeBanner;
-
-  /* ---------------- Object URL bookkeeping (prevents memory leaks) ---------------- */
 
   const blobUrlsRef = useRef<string[]>([]);
 
@@ -245,7 +448,6 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     };
   }, []);
 
-  // Auto-dismiss feedback banner
   useEffect(() => {
     if (!feedback) return;
     const timer = setTimeout(
@@ -255,12 +457,13 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     return () => clearTimeout(timer);
   }, [feedback]);
 
-  /* ---------------- Banner handlers ---------------- */
+  function showPremiumNotice(message: string) {
+    setFeedback({ type: "error", message });
+  }
 
-  // 1. When a file is chosen, validate it and open the Cropper
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    e.target.value = ""; // lets the user pick the same file again later
+    e.target.value = "";
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
@@ -284,23 +487,21 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     setRemoveBanner(false);
   }
 
-  // 2. Get the exact pixels while the image is being moved
   const onCropComplete = useCallback((_area: Area, areaPixels: Area) => {
     setCroppedAreaPixels(areaPixels);
   }, []);
 
-  // 3. Cut the image with the helper function
   async function handleSaveCrop() {
     if (!imageToCrop || !croppedAreaPixels) return;
     setIsCropping(true);
     try {
       const blob = await getCroppedImg(imageToCrop, croppedAreaPixels);
       if (blob) {
-        revokeUrl(bannerPreview); // free the previous crop preview (no-op for saved URLs)
+        revokeUrl(bannerPreview);
         setCroppedBlob(blob);
-        setBannerPreview(createUrl(blob)); // show the cropped result as the preview
+        setBannerPreview(createUrl(blob));
         revokeUrl(imageToCrop);
-        setImageToCrop(null); // close the cropper UI
+        setImageToCrop(null);
       }
     } catch (error) {
       console.error(error);
@@ -319,7 +520,6 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     revokeUrl(bannerPreview);
     setBannerPreview(null);
     setCroppedBlob(null);
-    // Only needs a server-side removal if a banner is already saved
     setRemoveBanner(!!profile?.banner_url);
   }
 
@@ -337,30 +537,21 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     setFeedback(null);
   }
 
-  /* ---------------- Submit ---------------- */
-
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFeedback(null);
 
-    // Use the current form so the hidden inputs are included
     const formData = new FormData(e.currentTarget);
 
-    // Prevent non-premium users from saving the premium-only glass mode
-    const resolvedColorMode =
-      colorMode === "glass" && !isPremium ? "system" : colorMode;
-
-    // Set the values from state
     formData.set("theme", selectedTheme);
-    formData.set("font_style", fontStyle);
-    formData.set("button_shape", buttonShape);
-    formData.set("color_mode", resolvedColorMode);
+    formData.set("font_style", effectiveFont);
+    formData.set("button_shape", effectiveShape);
+    formData.set("color_mode", effectiveMode);
 
     if (removeBanner) {
       formData.set("remove_banner", "true");
     }
 
-    // Compress the CROPPED BLOB if there's a new crop, and add it to the formData
     if (croppedBlob) {
       setIsCompressing(true);
       try {
@@ -388,7 +579,6 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
     startTransition(async () => {
       const result = await updateAppearance(formData);
       if (result?.error) {
-        // Nothing is reset on error, so the user's choices are kept
         setFeedback({ type: "error", message: result.error });
         return;
       }
@@ -402,30 +592,35 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* STATUS FEEDBACK BANNER */}
+      {/* Sticky so the message is always visible, even when a locked option
+          far down the page is clicked. */}
       {feedback && (
-        <div
-          role={feedback.type === "error" ? "alert" : "status"}
-          className={`p-4 rounded-2xl border text-sm font-semibold flex items-center gap-2.5 ${
-            feedback.type === "error"
-              ? "bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400"
-              : "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-          }`}
-        >
-          {feedback.type === "error" ? (
-            <AlertCircle className="w-5 h-5 shrink-0" />
-          ) : (
-            <CheckCircle2 className="w-5 h-5 shrink-0" />
-          )}
-          <span className="flex-1">{feedback.message}</span>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="p-1 rounded-lg opacity-70 hover:opacity-100 transition cursor-pointer"
-            aria-label="Dismiss message"
-          >
-            <X className="w-4 h-4" />
-          </button>
+        <div className="sticky top-4 z-30">
+          <div className="rounded-2xl bg-white dark:bg-dark-900 shadow-lg">
+            <div
+              role={feedback.type === "error" ? "alert" : "status"}
+              className={`p-4 rounded-2xl border text-sm font-semibold flex items-center gap-2.5 ${
+                feedback.type === "error"
+                  ? "bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400"
+                  : "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+              }`}
+            >
+              {feedback.type === "error" ? (
+                <AlertCircle className="w-5 h-5 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5 shrink-0" />
+              )}
+              <span className="flex-1">{feedback.message}</span>
+              <button
+                type="button"
+                onClick={() => setFeedback(null)}
+                className="p-1 rounded-lg opacity-70 hover:opacity-100 transition cursor-pointer"
+                aria-label="Dismiss message"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -451,7 +646,6 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
           value={profile?.banner_url || ""}
         />
 
-        {/* No name="banner" here: the cropped blob is appended manually on submit */}
         <input
           ref={fileInputRef}
           type="file"
@@ -461,7 +655,6 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
         />
 
         {imageToCrop ? (
-          /* Cropper UI (only shown after choosing a file) */
           <div className="space-y-4 animate-in fade-in">
             <div className="relative w-full aspect-[21/9] rounded-2xl overflow-hidden bg-slate-900">
               <Cropper
@@ -516,7 +709,6 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
             </div>
           </div>
         ) : bannerPreview ? (
-          /* Normal Preview UI */
           <div className="relative w-full aspect-[21/9] rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden bg-slate-50 dark:bg-dark-950">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -551,7 +743,6 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
             </div>
           </div>
         ) : (
-          /* Empty state */
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -629,29 +820,21 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
           </div>
           <div className="space-y-3">
             {FONTS.map((font) => (
-              <label key={font.id} className="flex items-center justify-between gap-3 cursor-pointer">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name="font_style_option"
-                    checked={fontStyle === font.id}
-                    onChange={() => setFontStyle(font.id)}
-                    className="w-4 h-4 accent-amber-500 cursor-pointer"
-                  />
-                  <span
-                    style={font.style}
-                    className={`text-sm text-slate-700 dark:text-slate-200 ${font.class}`}
-                  >
-                    {font.name}
-                  </span>
-                </div>
-                <span
-                  style={font.style}
-                  className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400"
-                >
-                  Aa
-                </span>
-              </label>
+              <ChoiceRow
+                key={font.id}
+                name="font_style_option"
+                label={font.name}
+                labelClassName={font.class}
+                labelStyle={font.style}
+                checked={fontStyle === font.id}
+                locked={font.premiumOnly && !isPremium}
+                premium={font.premiumOnly}
+                accentClass="accent-amber-500"
+                onSelect={() => setFontStyle(font.id)}
+                onLockedClick={() =>
+                  showPremiumNotice(`${font.name} font is exclusive to the PREMIUM plan.`)
+                }
+              />
             ))}
           </div>
         </fieldset>
@@ -667,24 +850,22 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
           </div>
           <div className="space-y-3">
             {BUTTON_SHAPES.map((btn) => (
-              <label
+              <ChoiceRow
                 key={btn.id}
-                className="flex items-center justify-between cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name="button_shape_option"
-                    checked={buttonShape === btn.id}
-                    onChange={() => setButtonShape(btn.id)}
-                    className="w-4 h-4 accent-blue-500 cursor-pointer"
-                  />
-                  <span className="text-sm text-slate-700 dark:text-slate-200">
-                    {btn.name}
-                  </span>
-                </div>
-                <div className={`w-8 h-4 bg-slate-200 dark:bg-slate-700 ${btn.sample}`} />
-              </label>
+                name="button_shape_option"
+                label={btn.name}
+                checked={buttonShape === btn.id}
+                locked={btn.premiumOnly && !isPremium}
+                premium={btn.premiumOnly}
+                accentClass="accent-blue-500"
+                onSelect={() => setButtonShape(btn.id)}
+                onLockedClick={() =>
+                  showPremiumNotice(`${btn.name} button shape is exclusive to the PREMIUM plan.`)
+                }
+                trailing={
+                  <div className={`w-8 h-4 bg-slate-200 dark:bg-slate-700 ${btn.sample}`} />
+                }
+              />
             ))}
           </div>
         </fieldset>
@@ -699,61 +880,26 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
             </h3>
           </div>
           <div className="space-y-3">
-            {COLOR_MODES.map((mode) => {
-              const isLocked = mode.premiumOnly && !isPremium;
-              return (
-                <label
-                  key={mode.id}
-                  onClick={(e) => {
-                    if (isLocked) {
-                      e.preventDefault();
-                      setFeedback({
-                        type: "error",
-                        message: "Midnight Glass Color Mode is exclusive to the Premium plan.",
-                      });
-                    }
-                  }}
-                  className={`flex items-center justify-between gap-3 ${
-                    isLocked ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="radio"
-                      name="color_mode_option"
-                      checked={colorMode === mode.id}
-                      disabled={isLocked}
-                      onChange={() => {
-                        if (!isLocked) setColorMode(mode.id);
-                      }}
-                      className="w-4 h-4 accent-purple-500 cursor-pointer disabled:cursor-not-allowed"
-                    />
-                    <span className="text-sm text-slate-700 dark:text-slate-200">
-                      {mode.name}
-                    </span>
-                  </div>
-
-                  {mode.premiumOnly && (
-                    isLocked ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                        <Lock className="w-2.5 h-2.5" />
-                        Pro
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-                        <Sparkles className="w-2.5 h-2.5" />
-                        Pro
-                      </span>
-                    )
-                  )}
-                </label>
-              );
-            })}
+            {COLOR_MODES.map((mode) => (
+              <ChoiceRow
+                key={mode.id}
+                name="color_mode_option"
+                label={mode.name}
+                checked={colorMode === mode.id}
+                locked={mode.premiumOnly && !isPremium}
+                premium={mode.premiumOnly}
+                accentClass="accent-purple-500"
+                onSelect={() => setColorMode(mode.id)}
+                onLockedClick={() =>
+                  showPremiumNotice(`${mode.name} is exclusive to the PREMIUM plan.`)
+                }
+              />
+            ))}
           </div>
         </fieldset>
       </div>
 
-      {/* 4. LIVE PREVIEW (matches the public card layout) */}
+      {/* 4. LIVE PREVIEW */}
       <div className="glass-card p-6 md:p-8 rounded-3xl shadow-sm border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-900">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-600 dark:text-slate-300">
@@ -769,76 +915,114 @@ export function AppearanceManager({ profile }: { profile: AppearanceProfile }) {
           </div>
         </div>
 
-        <div
-          style={currentFont.style}
-          className={`max-w-sm mx-auto overflow-hidden border shadow-xl rounded-3xl ${surface.card} ${currentFont.class}`}
-        >
-          {/* Banner */}
-          <div className={`relative h-28 ${currentTheme.gradient}`}>
-            {bannerPreview && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={bannerPreview}
-                alt=""
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-            )}
-            <div className="absolute top-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/30 backdrop-blur-md border border-white/20 text-white text-[10px] font-semibold">
-              <ShieldCheck className="w-3 h-3" />
-              KonekTap Verified
-            </div>
+        {fallbackNotes.length > 0 && (
+          <div
+            role="note"
+            className="mb-4 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs font-medium text-amber-700 dark:text-amber-300 flex items-start gap-2"
+          >
+            <Info className="w-4 h-4 shrink-0 mt-px" />
+            <span>
+              Your current plan doesn&apos;t include {fallbackNotes.join(", ")}. Your public
+              page shows the default instead, and the preview below matches that.
+            </span>
           </div>
+        )}
 
-          <div className="px-6 pb-6 text-center">
-            {/* Avatar + verified badge */}
-            <div className="relative w-fit mx-auto -mt-11">
-              <div
-                className={`w-[88px] h-[88px] border-4 bg-slate-700 flex items-center justify-center overflow-hidden ${surface.avatarBorder} ${buttonShape}`}
-              >
-                <span className="text-3xl font-bold text-slate-400">
-                  {previewInitial}
-                </span>
-              </div>
-              <div
-                className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 flex items-center justify-center ${surface.badgeBorder}`}
-              >
-                <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />
-              </div>
-            </div>
-
-            {/* Name, handle, title */}
-            <h4 className={`mt-4 text-2xl font-bold tracking-tight ${surface.name}`}>
-              {previewName}
-            </h4>
+        {/* Preview stage. Glass modes get the same backdrop as the public page
+            so the frosted/blurred effect is visible. */}
+        <div
+          className={`relative overflow-hidden p-6 sm:p-8 rounded-3xl border transition-colors ${stageClass}`}
+        >
+          {isGlass && (
             <div
-              className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-medium ${surface.handle}`}
-            >
-              @{previewUsername}
-              <Copy className="w-3 h-3" />
-            </div>
-            <p className={`mt-3 text-sm font-semibold ${currentTheme.text}`}>
-              Your title or business
-            </p>
-
-            {/* Divider + bio */}
-            <div className={`mt-5 pt-4 border-t ${surface.divider}`}>
-              <p className={`text-xs ${surface.bio}`}>
-                Your short bio appears here.
-              </p>
-            </div>
-
-            {/* Actions */}
-            <div className="mt-5 flex items-center gap-3">
+              aria-hidden="true"
+              className={`absolute top-6 left-1/2 -translate-x-1/2 w-[320px] h-[320px] rounded-full opacity-40 blur-[90px] pointer-events-none ${currentTheme.glow}`}
+            />
+          )}
+          {isFrosted && (
+            <>
               <div
-                className={`flex-1 inline-flex items-center justify-center gap-2 py-3 text-xs font-semibold shadow-[0_10px_30px_-8px_rgba(99,102,241,0.55)] ${surface.primaryBtn} ${buttonShape}`}
-              >
-                <UserPlus className="w-4 h-4" />
-                Save to Contacts
+                aria-hidden="true"
+                className="absolute -top-16 -left-16 w-[280px] h-[280px] rounded-full bg-blue-900/15 blur-[90px] pointer-events-none"
+              />
+              <div
+                aria-hidden="true"
+                className="absolute top-1/3 -right-16 w-[260px] h-[260px] rounded-full bg-slate-500/20 blur-[90px] pointer-events-none"
+              />
+            </>
+          )}
+
+          <div
+            style={currentFont.style}
+            className={`relative z-10 max-w-sm mx-auto overflow-hidden border shadow-xl rounded-3xl ${surface.card} ${currentFont.class}`}
+          >
+            {/* Banner */}
+            <div className={`relative h-28 ${currentTheme.gradient}`}>
+              {bannerPreview && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={bannerPreview}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )}
+              <div className="absolute top-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/30 backdrop-blur-md border border-white/20 text-white text-[10px] font-semibold">
+                <ShieldCheck className="w-3 h-3" />
+                KonekTap Verified
               </div>
+            </div>
+
+            <div className="px-6 pb-6 text-center">
+              {/* Avatar + verified badge */}
+              <div className="relative w-fit mx-auto -mt-11">
+                <div
+                  className={`w-[88px] h-[88px] border-4 bg-slate-700 flex items-center justify-center overflow-hidden ${surface.avatarBorder} ${effectiveShape}`}
+                >
+                  <span className="text-3xl font-bold text-slate-400">
+                    {previewInitial}
+                  </span>
+                </div>
+                <div
+                  className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 flex items-center justify-center ${surface.badgeBorder}`}
+                >
+                  <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />
+                </div>
+              </div>
+
+              {/* Name, handle, title */}
+              <h4 className={`mt-4 text-2xl font-bold tracking-tight ${surface.name}`}>
+                {previewName}
+              </h4>
               <div
-                className={`w-12 h-12 shrink-0 border flex items-center justify-center ${surface.qrBtn} ${buttonShape}`}
+                className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-medium ${surface.handle}`}
               >
-                <QrCode className="w-5 h-5" />
+                @{previewUsername}
+                <Copy className="w-3 h-3" />
+              </div>
+              <p className={`mt-3 text-sm font-semibold ${professionClass}`}>
+                Your title or business
+              </p>
+
+              {/* Divider + bio */}
+              <div className={`mt-5 pt-4 border-t ${surface.divider}`}>
+                <p className={`text-xs ${surface.bio}`}>
+                  Your short bio appears here.
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="mt-5 flex items-center gap-3">
+                <div
+                  className={`flex-1 inline-flex items-center justify-center gap-2 py-3 text-xs font-semibold shadow-xl ${primaryBtnClass} ${effectiveShape}`}
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Save to Contacts
+                </div>
+                <div
+                  className={`w-12 h-12 shrink-0 border flex items-center justify-center ${surface.qrBtn} ${effectiveShape}`}
+                >
+                  <QrCode className="w-5 h-5" />
+                </div>
               </div>
             </div>
           </div>

@@ -69,6 +69,8 @@ interface BusinessHubManagerProps {
 }
 
 type TabType = "services" | "map" | "appointments" | "catalog";
+// Which request is running, so only the button that started it shows a spinner
+type BusyAction = "add" | "update" | "delete" | "reorder" | "settings" | null;
 
 const BOOKING_PLATFORMS = [
   { id: "calendar", label: "Calendly / Cal.com", icon: Calendar },
@@ -77,14 +79,17 @@ const BOOKING_PLATFORMS = [
   { id: "inperson", label: "In-Person / Studio Visit", icon: Users },
 ] as const;
 
-const inputClass =
-  "w-full px-4 py-2.5 rounded-xl bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-sm text-slate-900 dark:text-white outline-none transition";
+// Shared with every text field so they all look and behave the same
+const INPUT_CLASS =
+  "w-full px-4 py-2.5 rounded-xl bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-sm text-slate-900 dark:text-white outline-none transition-colors";
 
-const editInputClass =
-  "w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-sm text-slate-900 dark:text-white outline-none transition";
+const EDIT_INPUT_CLASS =
+  "w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-sm text-slate-900 dark:text-white outline-none transition-colors";
 
-const submitBtnClass =
-  "w-full py-3 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-brand-600 dark:hover:bg-brand-500 font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed";
+const FOCUS_RING =
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-900";
+
+const SUBMIT_BTN_CLASS = `w-full py-3 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-brand-600 dark:hover:bg-brand-500 font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed`;
 
 const ALLOWED_MAP_PREFIXES = [
   "https://www.google.com/maps/embed",
@@ -194,6 +199,18 @@ function formatGoogleDriveLink(
   };
 }
 
+function CharCount({ value, max }: { value: number; max: number }) {
+  return (
+    <p
+      className={`text-[11px] text-right ${
+        value >= max ? "text-amber-600 dark:text-amber-400" : "text-slate-400"
+      }`}
+    >
+      {value}/{max}
+    </p>
+  );
+}
+
 export function BusinessHubManager({
   initialServices,
   profile,
@@ -203,6 +220,8 @@ export function BusinessHubManager({
   const [activeTab, setActiveTab] = useState<TabType>("services");
   const [services, setServices] = useState<ServiceItem[]>(initialServices);
   const [isPending, startTransition] = useTransition();
+  const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const isBusy = isPending || busyAction !== null;
   const [isMounted, setIsMounted] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -214,6 +233,7 @@ export function BusinessHubManager({
   const [editPrice, setEditPrice] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [newDescLength, setNewDescLength] = useState(0);
 
   const [locationAddress, setLocationAddress] = useState(
     profile?.location_address || ""
@@ -271,6 +291,23 @@ export function BusinessHubManager({
     );
     return () => clearTimeout(timer);
   }, [feedback]);
+
+  // Escape cancels a pending delete confirmation
+  useEffect(() => {
+    if (!confirmDeleteId) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setConfirmDeleteId(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmDeleteId]);
+
+  // Auto-dismiss the Google Drive conversion notice
+  useEffect(() => {
+    if (!gdriveNotice) return;
+    const timer = setTimeout(() => setGdriveNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [gdriveNotice]);
 
   const tabs = [
     { id: "services", label: "Services & Pricing", icon: Briefcase },
@@ -367,24 +404,37 @@ export function BusinessHubManager({
 
   function handleAddService(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (isBusy) return; // ignore double submits while a request is running
     setFeedback(null);
     const formElement = e.currentTarget;
     const formData = new FormData(formElement);
     formData.append("position", services.length.toString());
+    setBusyAction("add");
 
     startTransition(async () => {
-      const result = await addService(formData);
-      if (result?.error) {
-        setFeedback({ type: "error", message: result.error });
-        return;
+      try {
+        const result = await addService(formData);
+        if (result?.error) {
+          setFeedback({ type: "error", message: result.error });
+          return;
+        }
+        formElement.reset();
+        setNewDescLength(0);
+        setFeedback({ type: "success", message: "Service added successfully!" });
+        router.refresh();
+      } catch {
+        setFeedback({
+          type: "error",
+          message: "Could not add the service. Please try again.",
+        });
+      } finally {
+        setBusyAction(null);
       }
-      formElement.reset();
-      setFeedback({ type: "success", message: "Service added successfully!" });
-      router.refresh();
     });
   }
 
   function handleUpdateService(id: string) {
+    if (isBusy) return;
     if (!editTitle.trim() || !editPrice.trim()) {
       setFeedback({
         type: "error",
@@ -400,6 +450,7 @@ export function BusinessHubManager({
     formData.append("price", editPrice.trim());
     formData.append("description", editDescription.trim());
 
+    // Optimistic update, with a snapshot so we can roll back on failure
     const previous = services;
     setServices((prev) =>
       prev.map((item) =>
@@ -414,38 +465,67 @@ export function BusinessHubManager({
       )
     );
     setEditingId(null);
+    setBusyAction("update");
 
     startTransition(async () => {
-      const result = await updateService(formData);
-      if (result?.error) {
-        setServices(previous);
-        setFeedback({ type: "error", message: result.error });
-      } else {
+      try {
+        const result = await updateService(formData);
+        if (result?.error) {
+          setServices(previous);
+          setFeedback({ type: "error", message: result.error });
+          return;
+        }
         setFeedback({
           type: "success",
           message: "Service updated successfully!",
         });
+        router.refresh();
+      } catch {
+        setServices(previous);
+        setFeedback({
+          type: "error",
+          message: "Could not update the service. Please try again.",
+        });
+      } finally {
+        setBusyAction(null);
       }
     });
   }
 
   function handleDeleteService(id: string) {
+    if (isBusy) return;
     setFeedback(null);
     setConfirmDeleteId(null);
+    setBusyAction("delete");
 
     const previous = services;
     setServices((prev) => prev.filter((item) => item.id !== id));
 
     startTransition(async () => {
-      const result = await deleteService(id);
-      if (result?.error) {
+      try {
+        const result = await deleteService(id);
+        if (result?.error) {
+          setServices(previous);
+          setFeedback({ type: "error", message: result.error });
+          return;
+        }
+        setFeedback({ type: "success", message: "Service deleted." });
+        router.refresh();
+      } catch {
         setServices(previous);
-        setFeedback({ type: "error", message: result.error });
+        setFeedback({
+          type: "error",
+          message: "Could not delete the service. Please try again.",
+        });
+      } finally {
+        setBusyAction(null);
       }
     });
   }
 
   function handleDragEnd(result: DropResult) {
+    // Dragging is disabled while busy, so this is only a safety net
+    if (isBusy) return;
     if (!result.destination) return;
     if (result.destination.index === result.source.index) return;
 
@@ -459,6 +539,7 @@ export function BusinessHubManager({
       position: index,
     }));
     setServices(updatedItems);
+    setBusyAction("reorder");
 
     startTransition(async () => {
       try {
@@ -476,12 +557,15 @@ export function BusinessHubManager({
           type: "error",
           message: "Could not save the new order. Please try again.",
         });
+      } finally {
+        setBusyAction(null);
       }
     });
   }
 
   function handleSaveSettings(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (isBusy) return;
     setFeedback(null);
 
     const formData = new FormData(e.currentTarget);
@@ -529,16 +613,27 @@ export function BusinessHubManager({
       }
     }
 
+    setBusyAction("settings");
+
     startTransition(async () => {
-      const result = await updateBusinessSettings(formData);
-      if (result?.error) {
-        setFeedback({ type: "error", message: result.error });
-      } else {
+      try {
+        const result = await updateBusinessSettings(formData);
+        if (result?.error) {
+          setFeedback({ type: "error", message: result.error });
+          return;
+        }
         setFeedback({
           type: "success",
           message: "Business settings saved successfully!",
         });
         router.refresh();
+      } catch {
+        setFeedback({
+          type: "error",
+          message: "Could not save your settings. Please try again.",
+        });
+      } finally {
+        setBusyAction(null);
       }
     });
   }
@@ -610,9 +705,11 @@ export function BusinessHubManager({
               key={tab.id}
               type="button"
               role="tab"
+              id={`bh-tab-${tab.id}`}
+              aria-controls={`bh-panel-${tab.id}`}
               aria-selected={isActive}
               onClick={() => handleTabChange(tab.id)}
-              className={`flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-sm font-semibold whitespace-nowrap transition-all cursor-pointer ${
+              className={`flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-sm font-semibold whitespace-nowrap transition-all cursor-pointer ${FOCUS_RING} ${
                 isActive
                   ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-md"
                   : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
@@ -625,43 +722,49 @@ export function BusinessHubManager({
         })}
       </div>
 
+      {/* Sticky so feedback stays visible even when the user has scrolled down a long form or list */}
       {feedback && (
-        <div
-          role={feedback.type === "error" ? "alert" : "status"}
-          className={`p-4 rounded-2xl border text-sm font-semibold flex items-center gap-2.5 ${
-            feedback.type === "error"
-              ? "bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400"
-              : "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-          }`}
-        >
-          {feedback.type === "error" ? (
-            <AlertCircle className="w-5 h-5 shrink-0" />
-          ) : (
-            <CheckCircle2 className="w-5 h-5 shrink-0" />
-          )}
-          <span className="flex-1">{feedback.message}</span>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="p-1 rounded-lg opacity-70 hover:opacity-100 transition cursor-pointer"
-            aria-label="Dismiss message"
-          >
-            <X className="w-4 h-4" />
-          </button>
+        <div className="sticky top-4 z-30">
+          <div className="rounded-2xl bg-white dark:bg-dark-900 shadow-lg">
+            <div
+              role={feedback.type === "error" ? "alert" : "status"}
+              className={`p-4 rounded-2xl border text-sm font-semibold flex items-center gap-2.5 ${
+                feedback.type === "error"
+                  ? "bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400"
+                  : "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+              }`}
+            >
+              {feedback.type === "error" ? (
+                <AlertCircle className="w-5 h-5 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5 shrink-0" />
+              )}
+              <span className="flex-1">{feedback.message}</span>
+              <button
+                type="button"
+                onClick={() => setFeedback(null)}
+                className={`p-1 rounded-lg opacity-70 hover:opacity-100 transition cursor-pointer ${FOCUS_RING}`}
+                aria-label="Dismiss message"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
       {/* TAB 1: SERVICES & PRICING */}
       {activeTab === "services" && (
-        <div className="space-y-6">
+        <div role="tabpanel" id="bh-panel-services" aria-labelledby="bh-tab-services" className="space-y-6">
           <form
             onSubmit={handleAddService}
             className="glass-card p-6 rounded-3xl shadow-xl space-y-4 border border-slate-200 dark:border-white/10"
           >
             <div>
-              <h3 className="font-bold text-slate-900 dark:text-white">
-                Add Service or Package
-              </h3>
+              <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+<Briefcase className="w-5 h-5 text-brand-500 shrink-0" />
+Add Service or Package
+</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Showcase your offerings and rate cards directly on your public profile.
               </p>
@@ -669,51 +772,58 @@ export function BusinessHubManager({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Service Name
-                </label>
+                <label htmlFor="bh-service-title" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Service Name
+</label>
                 <input
-                  name="title"
+                  id="bh-service-title"
+ autoComplete="off"
+ name="title"
                   required
                   maxLength={80}
                   placeholder="e.g. Full Web Application Setup"
-                  className={inputClass}
+                  className={INPUT_CLASS}
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Price / Rate
-                </label>
+                <label htmlFor="bh-service-price" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Price / Rate
+</label>
                 <input
-                  name="price"
+                  id="bh-service-price"
+ autoComplete="off"
+ name="price"
                   required
                   maxLength={40}
                   placeholder="e.g. 15000 or Starts at ₱1,500"
-                  className={inputClass}
+                  className={INPUT_CLASS}
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Short Description (Optional)
-              </label>
+              <label htmlFor="bh-service-description" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Short Description (Optional)
+</label>
               <textarea
-                name="description"
+                id="bh-service-description"
+ name="description"
                 rows={2}
                 maxLength={240}
+                onChange={(e) => setNewDescLength(e.target.value.length)}
                 placeholder="Briefly describe what is included in this service..."
-                className={inputClass}
-              />
+className={`${INPUT_CLASS} resize-none`}
+/>
+<CharCount value={newDescLength} max={240} />
             </div>
 
-            <button type="submit" disabled={isPending} className={submitBtnClass}>
-              {isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Plus className="w-4 h-4" />
-              )}
-              {isPending ? "Saving..." : "Add Service"}
+            <button type="submit" disabled={isBusy} className={SUBMIT_BTN_CLASS}>
+              {busyAction === "add" ? (
+<Loader2 className="w-4 h-4 animate-spin" />
+) : (
+<Plus className="w-4 h-4" />
+)}
+{busyAction === "add" ? "Adding..." : "Add Service"}
             </button>
           </form>
 
@@ -756,7 +866,7 @@ export function BusinessHubManager({
                             key={service.id}
                             draggableId={service.id}
                             index={index}
-                            isDragDisabled={isEditing}
+                            isDragDisabled={isEditing || isBusy}
                           >
                             {(provided, snapshot) => (
                               <div
@@ -777,71 +887,77 @@ export function BusinessHubManager({
                                   >
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                       <div className="space-y-1">
-                                        <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                                          Service Name
-                                        </label>
+                                        <label htmlFor="bh-edit-title" className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+Service Name
+</label>
                                         <input
                                           autoFocus
-                                          value={editTitle}
+                                          id="bh-edit-title"
+ autoComplete="off"
+ value={editTitle}
                                           maxLength={80}
                                           onChange={(e) =>
                                             setEditTitle(e.target.value)
                                           }
                                           placeholder="Service Name"
-                                          className={editInputClass}
+                                          className={EDIT_INPUT_CLASS}
                                         />
                                       </div>
                                       <div className="space-y-1">
-                                        <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                                          Price / Rate
-                                        </label>
+                                        <label htmlFor="bh-edit-price" className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+Price / Rate
+</label>
                                         <input
-                                          value={editPrice}
+                                          id="bh-edit-price"
+ autoComplete="off"
+ value={editPrice}
                                           maxLength={40}
                                           onChange={(e) =>
                                             setEditPrice(e.target.value)
                                           }
                                           placeholder="Price / Rate"
-                                          className={editInputClass}
+                                          className={EDIT_INPUT_CLASS}
                                         />
                                       </div>
                                     </div>
 
                                     <div className="space-y-1">
-                                      <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                                        Description (Optional)
-                                      </label>
+                                      <label htmlFor="bh-edit-description" className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+Description (Optional)
+</label>
                                       <textarea
                                         rows={2}
-                                        value={editDescription}
+                                        id="bh-edit-description"
+ value={editDescription}
                                         maxLength={240}
                                         onChange={(e) =>
                                           setEditDescription(e.target.value)
                                         }
                                         placeholder="Short description..."
-                                        className={editInputClass}
-                                      />
+className={`${EDIT_INPUT_CLASS} resize-none`}
+/>
+<CharCount value={editDescription.length} max={240} />
                                     </div>
 
                                     <div className="flex items-center justify-end gap-2 pt-1">
                                       <button
                                         type="button"
                                         onClick={cancelEditing}
-                                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition cursor-pointer"
+                                        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition cursor-pointer ${FOCUS_RING}`}
                                       >
                                         <X className="w-3.5 h-3.5" />
                                         Cancel
                                       </button>
                                       <button
                                         type="button"
-                                        disabled={isPending}
+                                        disabled={isBusy}
                                         onClick={() =>
                                           handleUpdateService(service.id)
                                         }
-                                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-sm transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-sm transition cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed ${FOCUS_RING}`}
                                       >
-                                        {isPending ? (
-                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        {busyAction === "update" ? (
+<Loader2 className="w-3.5 h-3.5 animate-spin" />
                                         ) : (
                                           <Check className="w-3.5 h-3.5" />
                                         )}
@@ -880,26 +996,31 @@ export function BusinessHubManager({
                                     <div className="flex items-center gap-1 shrink-0">
                                       {isConfirmingDelete ? (
                                         <>
-                                          <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 mr-1">
-                                            Delete?
-                                          </span>
+                                          <span
+ role="alert"
+ className="text-xs font-semibold text-rose-600 dark:text-rose-400 mr-1"
+ >
+ Delete this service?
+ </span>
                                           <button
                                             type="button"
                                             onClick={() =>
                                               handleDeleteService(service.id)
                                             }
-                                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white transition cursor-pointer"
+ disabled={isBusy}
+ autoFocus
+                                            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white transition cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed ${FOCUS_RING}`}
                                           >
-                                            Yes
+                                            Yes, delete
                                           </button>
                                           <button
                                             type="button"
                                             onClick={() =>
                                               setConfirmDeleteId(null)
                                             }
-                                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition cursor-pointer"
+                                            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition cursor-pointer ${FOCUS_RING}`}
                                           >
-                                            No
+                                            Cancel
                                           </button>
                                         </>
                                       ) : (
@@ -907,9 +1028,9 @@ export function BusinessHubManager({
                                           <button
                                             type="button"
                                             onClick={() => startEditing(service)}
-                                            className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 rounded-lg transition-colors cursor-pointer"
-                                            title="Edit Service"
-                                            aria-label="Edit service"
+                                            className={`p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 rounded-lg transition-colors cursor-pointer ${FOCUS_RING}`}
+                                            title="Edit service"
+                                            aria-label={`Edit ${service.title}`}
                                           >
                                             <Pencil className="w-4 h-4" />
                                           </button>
@@ -918,9 +1039,10 @@ export function BusinessHubManager({
                                             onClick={() =>
                                               setConfirmDeleteId(service.id)
                                             }
-                                            className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                                            title="Delete Service"
-                                            aria-label="Delete service"
+                                            className={`p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed ${FOCUS_RING}`}
+                                            title="Delete service"
+                                            aria-label={`Delete ${service.title}`}
+ disabled={isBusy}
                                           >
                                             <Trash2 className="w-4 h-4" />
                                           </button>
@@ -946,30 +1068,33 @@ export function BusinessHubManager({
 
       {/* TAB 2: LOCATION & MAP */}
       {activeTab === "map" && (
-        <form
+        <form role="tabpanel" id="bh-panel-map" aria-labelledby="bh-tab-map"
           onSubmit={handleSaveSettings}
           className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10"
         >
           <input type="hidden" name="section" value="map" />
           <div>
-            <h3 className="font-bold text-slate-900 dark:text-white">
-              Store Location & Map
-            </h3>
+            <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+<MapPin className="w-5 h-5 text-brand-500 shrink-0" />
+Store Location & Map
+</h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Display your physical store, studio, or office address and an interactive Google Map on your card.
             </p>
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Search Location / Address / Landmark
-            </label>
+            <label htmlFor="bh-location-address" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Search Location / Address / Landmark
+</label>
             <input
-              name="location_address"
+              id="bh-location-address"
+ autoComplete="off"
+ name="location_address"
               value={locationAddress}
               onChange={(e) => setLocationAddress(e.target.value)}
               placeholder="e.g. 435 Illang-illang St. Imus City, Cavite"
-              className={inputClass}
+              className={INPUT_CLASS}
             />
             <p className="text-[11px] text-slate-400">
               Type your specific store name or address here to automatically generate the live Google Map below.
@@ -977,15 +1102,18 @@ export function BusinessHubManager({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Custom Google Maps Embed URL or iframe Code (Optional)
-            </label>
+            <label htmlFor="bh-map-embed" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Custom Google Maps Embed URL or iframe Code (Optional)
+</label>
             <input
-              name="map_embed_url"
+              id="bh-map-embed"
+ autoComplete="off"
+ spellCheck={false}
+ name="map_embed_url"
               value={mapEmbedInput}
               onChange={(e) => setMapEmbedInput(e.target.value)}
               placeholder="https://www.google.com/maps/embed?pb=... or paste full <iframe> code"
-              className={inputClass}
+              className={INPUT_CLASS}
             />
             <p className="text-[11px] text-slate-400">
               Tip: Go to Google Maps, click <strong>Share → Embed a map</strong>, and paste the URL or iframe code here for an exact custom pin.
@@ -1017,7 +1145,7 @@ export function BusinessHubManager({
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-brand-500 hover:underline"
+                  className={`inline-flex items-center gap-1 text-xs font-semibold text-brand-500 hover:underline rounded ${FOCUS_RING}`}
                 >
                   <span>Open in Google Maps</span>
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -1055,16 +1183,16 @@ export function BusinessHubManager({
             )}
           </div>
 
-          <button type="submit" disabled={isPending} className={submitBtnClass}>
-            {isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-            {isPending ? "Saving Map Settings..." : "Save Location & Map"}
+          <button type="submit" disabled={isBusy} className={SUBMIT_BTN_CLASS}>
+            {busyAction === "settings" && <Loader2 className="w-4 h-4 animate-spin" />}
+            {busyAction === "settings" ? "Saving Map Settings..." : "Save Location & Map"}
           </button>
         </form>
       )}
 
       {/* TAB 3: APPOINTMENTS */}
       {activeTab === "appointments" && (
-        <form
+        <form role="tabpanel" id="bh-panel-appointments" aria-labelledby="bh-tab-appointments"
           onSubmit={handleSaveSettings}
           className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10"
         >
@@ -1073,9 +1201,10 @@ export function BusinessHubManager({
 
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <h3 className="font-bold text-slate-900 dark:text-white">
-                Appointment & Consultation Card
-              </h3>
+              <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+<Calendar className="w-5 h-5 text-brand-500 shrink-0" />
+Appointment & Consultation Card
+</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Customize a rich booking card so clients can schedule meetings, calls, or reservations directly from your profile.
               </p>
@@ -1086,7 +1215,7 @@ export function BusinessHubManager({
             </div>
           </div>
 
-          <label className="flex items-center gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 cursor-pointer">
+          <label className={`flex items-center gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 cursor-pointer ${FOCUS_RING}`}>
             <input
               type="checkbox"
               name="booking_enabled"
@@ -1105,10 +1234,14 @@ export function BusinessHubManager({
           </label>
 
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Meeting / Booking Type Icon
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <span id="bh-booking-type-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+Meeting / Booking Type Icon
+</span>
+            <div
+ role="radiogroup"
+ aria-labelledby="bh-booking-type-label"
+ className="grid grid-cols-2 sm:grid-cols-4 gap-2.5"
+ >
               {BOOKING_PLATFORMS.map((platform) => {
                 const Icon = platform.icon;
                 const isSelected = bookingPlatform === platform.id;
@@ -1116,8 +1249,10 @@ export function BusinessHubManager({
                   <button
                     key={platform.id}
                     type="button"
-                    onClick={() => setBookingPlatform(platform.id)}
-                    className={`p-3 rounded-2xl border text-left transition-all flex flex-col gap-2 cursor-pointer ${
+                    role="radio"
+ aria-checked={isSelected}
+ onClick={() => setBookingPlatform(platform.id)}
+                    className={`p-3 rounded-2xl border text-left transition-all flex flex-col gap-2 cursor-pointer ${FOCUS_RING} ${
                       isSelected
                         ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400 shadow-sm"
                         : "border-slate-200 dark:border-white/10 bg-white dark:bg-dark-950 text-slate-600 dark:text-slate-400 hover:border-slate-300"
@@ -1135,46 +1270,54 @@ export function BusinessHubManager({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Card Headline / CTA Title
-              </label>
+              <label htmlFor="bh-booking-title" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Card Headline / CTA Title
+</label>
               <input
-                name="booking_title"
+                id="bh-booking-title"
+ autoComplete="off"
+ name="booking_title"
                 maxLength={60}
                 value={bookingTitle}
                 onChange={(e) => setBookingTitle(e.target.value)}
                 placeholder="e.g. Schedule a Free 15-Min Discovery Call"
-                className={inputClass}
+                className={INPUT_CLASS}
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Booking / Calendar URL
-              </label>
+              <label htmlFor="bh-booking-url" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Booking / Calendar URL
+</label>
               <input
-                name="booking_url"
+                id="bh-booking-url"
+ inputMode="url"
+ autoComplete="off"
+ spellCheck={false}
+ name="booking_url"
                 type="url"
                 defaultValue={profile?.booking_url || ""}
                 placeholder="https://calendly.com/your-username"
-                className={inputClass}
+                className={INPUT_CLASS}
               />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Short Subtext / Expectations (Optional)
-            </label>
+            <label htmlFor="bh-booking-description" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Short Subtext / Expectations (Optional)
+</label>
             <textarea
-              name="booking_description"
+              id="bh-booking-description"
+ name="booking_description"
               rows={2}
               maxLength={160}
               value={bookingDesc}
               onChange={(e) => setBookingDesc(e.target.value)}
               placeholder="e.g. Pick a time slot that works best for you to discuss your project requirements and quotation."
-              className={inputClass}
-            />
+className={`${INPUT_CLASS} resize-none`}
+/>
+<CharCount value={bookingDesc.length} max={160} />
           </div>
 
           <div className="space-y-2 pt-2">
@@ -1207,10 +1350,10 @@ export function BusinessHubManager({
             </div>
           </div>
 
-          <button type="submit" disabled={isPending} className={submitBtnClass}>
-            {isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-            {isPending
-              ? "Saving Booking Settings..."
+          <button type="submit" disabled={isBusy} className={SUBMIT_BTN_CLASS}>
+            {busyAction === "settings" && <Loader2 className="w-4 h-4 animate-spin" />}
+            {busyAction === "settings"
+ ? "Saving Booking Settings..."
               : "Save Appointment Settings"}
           </button>
         </form>
@@ -1218,7 +1361,7 @@ export function BusinessHubManager({
 
       {/* TAB 4: PDF CATALOG / MENU WITH GOOGLE DRIVE AUTO-FORMATTER */}
       {activeTab === "catalog" && (
-        <form
+        <form role="tabpanel" id="bh-panel-catalog" aria-labelledby="bh-tab-catalog"
           onSubmit={handleSaveSettings}
           className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10"
         >
@@ -1231,9 +1374,10 @@ export function BusinessHubManager({
 
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <h3 className="font-bold text-slate-900 dark:text-white">
-                Featured Catalog / Digital Menu Showcase
-              </h3>
+              <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+<FileText className="w-5 h-5 text-brand-500 shrink-0" />
+Featured Catalog / Digital Menu Showcase
+</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Add a visual cover image and a direct link to your PDF brochure, restaurant menu, or rate sheet.
               </p>
@@ -1253,7 +1397,8 @@ export function BusinessHubManager({
               <button
                 type="button"
                 onClick={() => setGdriveNotice(null)}
-                className="p-1 opacity-70 hover:opacity-100 cursor-pointer"
+                className={`p-1 opacity-70 hover:opacity-100 cursor-pointer ${FOCUS_RING}`}
+                aria-label="Dismiss notice"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -1262,28 +1407,36 @@ export function BusinessHubManager({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Catalog / Menu Title
-              </label>
+              <label htmlFor="bh-catalog-title" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Catalog / Menu Title
+</label>
               <input
-                name="catalog_title"
+                id="bh-catalog-title"
+ autoComplete="off"
+ name="catalog_title"
                 maxLength={60}
                 value={catalogTitle}
                 onChange={(e) => setCatalogTitle(e.target.value)}
                 placeholder="e.g. 2026 Product Catalog & Price List"
-                className={inputClass}
+                className={INPUT_CLASS}
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Primary Button Action
-              </label>
-              <div className="grid grid-cols-2 gap-2">
+              <span id="bh-catalog-action-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+Primary Button Action
+</span>
+              <div
+ role="radiogroup"
+ aria-labelledby="bh-catalog-action-label"
+ className="grid grid-cols-2 gap-2"
+ >
                 <button
                   type="button"
-                  onClick={() => handleCatalogActionChange("view")}
-                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                  role="radio"
+ aria-checked={catalogActionType === "view"}
+ onClick={() => handleCatalogActionChange("view")}
+                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${FOCUS_RING} transition ${
                     catalogActionType === "view"
                       ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400"
                       : "border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400"
@@ -1294,8 +1447,10 @@ export function BusinessHubManager({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleCatalogActionChange("download")}
-                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                  role="radio"
+ aria-checked={catalogActionType === "download"}
+ onClick={() => handleCatalogActionChange("download")}
+                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${FOCUS_RING} transition ${
                     catalogActionType === "download"
                       ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400"
                       : "border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400"
@@ -1309,31 +1464,37 @@ export function BusinessHubManager({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Short Description (Optional)
-            </label>
+            <label htmlFor="bh-catalog-description" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Short Description (Optional)
+</label>
             <textarea
-              name="catalog_description"
+              id="bh-catalog-description"
+ name="catalog_description"
               rows={2}
               maxLength={160}
               value={catalogDesc}
               onChange={(e) => setCatalogDesc(e.target.value)}
               placeholder="e.g. Browse our complete menu, custom packages, and bulk pricing specifications."
-              className={inputClass}
-            />
+className={`${INPUT_CLASS} resize-none`}
+/>
+<CharCount value={catalogDesc.length} max={160} />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Cover Image URL (Supports Google Drive Image Share Links, Imgur, etc.)
-            </label>
+            <label htmlFor="bh-catalog-cover" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+Cover Image URL (Supports Google Drive Image Share Links, Imgur, etc.)
+</label>
             <input
-              name="catalog_cover_url"
+              id="bh-catalog-cover"
+ inputMode="url"
+ autoComplete="off"
+ spellCheck={false}
+ name="catalog_cover_url"
               type="url"
               value={catalogCoverUrl}
               onChange={(e) => handleCatalogCoverUrlChange(e.target.value)}
               placeholder="Paste Google Drive image link or direct image URL..."
-              className={inputClass}
+              className={INPUT_CLASS}
             />
             <p className="text-[11px] text-slate-400">
               Tip: Paste any public Google Drive image link and it will automatically convert into a direct thumbnail URL.
@@ -1341,16 +1502,20 @@ export function BusinessHubManager({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              PDF / Catalog Link (Auto-Formats Google Drive Links)
-            </label>
+            <label htmlFor="bh-catalog-pdf" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+PDF / Catalog Link (Auto-Formats Google Drive Links)
+</label>
             <input
-              name="catalog_pdf_url"
+              id="bh-catalog-pdf"
+ inputMode="url"
+ autoComplete="off"
+ spellCheck={false}
+ name="catalog_pdf_url"
               type="url"
               value={catalogPdfUrl}
               onChange={(e) => handleCatalogPdfUrlChange(e.target.value)}
               placeholder="Paste Google Drive PDF share link or direct PDF URL..."
-              className={inputClass}
+              className={INPUT_CLASS}
             />
             <p className="text-[11px] text-slate-400">
               Tip: Upload your PDF to Google Drive (set access to <strong>Anyone with the link</strong>) and paste the link here—we auto-convert it for instant viewing or direct download.
@@ -1366,7 +1531,7 @@ export function BusinessHubManager({
                 href={catalogPdfUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline shrink-0"
+                className={`inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline shrink-0 rounded ${FOCUS_RING}`}
               >
                 <span>Test Link</span>
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -1374,9 +1539,9 @@ export function BusinessHubManager({
             </div>
           )}
 
-          <button type="submit" disabled={isPending} className={submitBtnClass}>
-            {isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-            {isPending ? "Saving Catalog..." : "Save Catalog Settings"}
+          <button type="submit" disabled={isBusy} className={SUBMIT_BTN_CLASS}>
+            {busyAction === "settings" && <Loader2 className="w-4 h-4 animate-spin" />}
+            {busyAction === "settings" ? "Saving Catalog..." : "Save Catalog Settings"}
           </button>
         </form>
       )}

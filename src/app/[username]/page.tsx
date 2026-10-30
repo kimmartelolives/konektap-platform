@@ -33,6 +33,9 @@ const PLATFORM_ICONS: Record<string, React.ElementType> = {
 
 const THEME_BANNERS: Record<string, string> = {
   default: "bg-gradient-to-br from-brand-600 via-indigo-600 to-accent-500",
+  executive: "bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 border border-slate-200",
+  corporate: "bg-gradient-to-br from-slate-900 via-zinc-900 to-slate-950 border border-slate-700",
+  luxe: "bg-gradient-to-br from-amber-600 via-yellow-700 to-stone-900",
   emerald: "bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700",
   midnight: "bg-gradient-to-br from-slate-950 via-slate-800 to-zinc-900",
   rose: "bg-gradient-to-br from-rose-500 via-red-500 to-pink-600",
@@ -40,16 +43,27 @@ const THEME_BANNERS: Record<string, string> = {
   amethyst: "bg-gradient-to-br from-violet-600 via-purple-600 to-fuchsia-600",
 };
 
-// Extra accents drawn on top of the banner gradient (Midnight Gold gets a gold glow + hairline)
+// Extra accents drawn on top of the banner gradient
 const THEME_BANNER_ACCENTS: Record<string, { glow: string; line: string }> = {
   midnight: {
     glow: "bg-[radial-gradient(ellipse_at_top_right,rgba(245,158,11,0.35),transparent_60%)]",
     line: "via-amber-400/60",
   },
+  corporate: {
+    glow: "bg-[radial-gradient(ellipse_at_top_right,rgba(99,102,241,0.25),transparent_60%)]",
+    line: "via-indigo-500/50",
+  },
+  luxe: {
+    glow: "bg-[radial-gradient(ellipse_at_top_right,rgba(251,191,36,0.3),transparent_60%)]",
+    line: "via-amber-500/50",
+  },
 };
 
 const THEME_BUTTONS: Record<string, string> = {
   default: "bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-brand-600 dark:hover:bg-brand-500 shadow-brand-500/25",
+  executive: "bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-500/25",
+  corporate: "bg-slate-800 text-white hover:bg-slate-700 shadow-slate-900/25 border border-slate-700",
+  luxe: "bg-amber-500 text-slate-950 hover:bg-amber-400 shadow-amber-500/25",
   emerald: "bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-500/25",
   midnight: "bg-amber-500 text-slate-900 hover:bg-amber-400 shadow-amber-500/25",
   rose: "bg-rose-600 text-white hover:bg-rose-500 shadow-rose-500/25",
@@ -57,9 +71,12 @@ const THEME_BUTTONS: Record<string, string> = {
   amethyst: "bg-purple-600 text-white hover:bg-purple-500 shadow-purple-500/25",
 };
 
-// Accent color for the profession line (matches the theme, like the Appearance preview)
+// Accent color for the profession line
 const THEME_TEXT: Record<string, { base: string; glass: string }> = {
   default: { base: "text-brand-600 dark:text-accent-400", glass: "text-accent-400" },
+  executive: { base: "text-indigo-600 dark:text-indigo-400", glass: "text-indigo-300" },
+  corporate: { base: "text-slate-700 dark:text-slate-300", glass: "text-slate-300" },
+  luxe: { base: "text-amber-600 dark:text-amber-400", glass: "text-amber-300" },
   emerald: { base: "text-emerald-600 dark:text-emerald-400", glass: "text-emerald-400" },
   midnight: { base: "text-amber-600 dark:text-amber-400", glass: "text-amber-400" },
   rose: { base: "text-rose-600 dark:text-rose-400", glass: "text-rose-400" },
@@ -67,15 +84,35 @@ const THEME_TEXT: Record<string, { base: string; glass: string }> = {
   amethyst: { base: "text-violet-600 dark:text-violet-400", glass: "text-violet-400" },
 };
 
-// Vivid colors for the Glass-mode background glow. The banner gradients are too dark
-// for Midnight, so the glow was invisible before.
 const THEME_GLOWS: Record<string, string> = {
   default: "bg-gradient-to-br from-brand-500 via-indigo-500 to-accent-500",
+  executive: "bg-gradient-to-br from-blue-400 via-indigo-500 to-slate-400",
+  corporate: "bg-gradient-to-br from-slate-700 via-indigo-900 to-slate-950",
+  luxe: "bg-gradient-to-br from-amber-500 via-yellow-600 to-stone-900",
   emerald: "bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-500",
   midnight: "bg-gradient-to-br from-amber-500 via-indigo-600 to-purple-700",
   rose: "bg-gradient-to-br from-rose-500 via-red-500 to-pink-500",
   cyber: "bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-500",
   amethyst: "bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500",
+};
+
+// Font + shape maps live here so the public page does not depend on Tailwind config
+const FONT_FAMILIES: Record<string, string> = {
+  "font-sans": "ui-sans-serif, system-ui, -apple-system, sans-serif",
+  "font-serif": "ui-serif, Georgia, Cambria, 'Times New Roman', serif",
+  "font-mono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace",
+  "font-display": "'Plus Jakarta Sans', 'Outfit', 'Inter', system-ui, sans-serif",
+  "font-futura": "Futura, 'Futura PT', 'Jost', 'Century Gothic', 'Trebuchet MS', sans-serif",
+  "font-editorial": "Futura, 'Futura PT', 'Jost', 'Century Gothic', 'Trebuchet MS', sans-serif", // legacy saved value
+};
+const PRO_FONTS = ["font-futura", "font-editorial"];
+
+const SHAPES: Record<string, string> = {
+  "rounded-full": "rounded-full",
+  "rounded-2xl": "rounded-2xl",
+  "rounded-lg": "rounded-lg",
+  "rounded-none": "rounded-none",
+  "rounded-[32px]": "rounded-[32px]",
 };
 
 /* ---------------- Helpers ---------------- */
@@ -84,11 +121,10 @@ function safeDecode(value: string): string | null {
   try {
     return decodeURIComponent(value);
   } catch {
-    return null; // malformed URL like /%E0%A4%A
+    return null;
   }
 }
 
-// Only plain http(s) links are allowed (blocks javascript:, data:, etc.)
 function isSafeHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -132,7 +168,6 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
     notFound();
   }
 
-  // These three queries don't depend on each other, so run them in parallel
   const [{ data: links }, { data: portfolioItems }, { data: services }] = await Promise.all([
     supabase
       .from("social_links")
@@ -152,36 +187,46 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
       .order("position", { ascending: true }),
   ]);
 
-  // Never render a link with an unsafe protocol on a public page
   const safeLinks = (links ?? []).filter(
     (link) => typeof link.url === "string" && isSafeHttpUrl(link.url)
   );
 
-  const shapeClass = profile.button_shape || "rounded-2xl";
-  const fontClass = profile.font_style || "font-sans";
+  const shapeClass = SHAPES[String(profile.button_shape)] ?? "rounded-2xl";
   const themeId: string = profile.theme in THEME_BANNERS ? profile.theme : "default";
 
   const tier: string = profile.tier || "demo";
+
+  const requestedFont: string = profile.font_style || "font-sans";
+  const fontFamily =
+    PRO_FONTS.includes(requestedFont) && tier !== "premium"
+      ? FONT_FAMILIES["font-sans"]
+      : FONT_FAMILIES[requestedFont] ?? FONT_FAMILIES["font-sans"];
+  // keep the display look on the default font only, so other font choices apply to the name too
+  const headingFontClass = requestedFont === "font-sans" ? "font-display" : "";
   const canCaptureLeads =
     (tier === "standard" || tier === "premium") && (profile.show_lead_form ?? true);
   const hasContactDetails = !!(profile.phone_public || profile.email_public || canCaptureLeads);
 
-  // Midnight Glass Color Mode (exclusive to Premium)
+  // Color Modes (Glass o Business Glass / Enterprise Minimal)
   const isGlassMode = profile.color_mode === "glass" && tier === "premium";
+  const isEnterpriseGlass = profile.color_mode === "business-glass" && tier === "premium";
 
-  // Glass is a dark-only look. Force dark for the rest of the page (including the child
-  // components) and fall back to "system" if a non-premium account still has "glass" saved.
   const effectiveColorMode = isGlassMode
     ? "dark"
-    : profile.color_mode === "glass"
+    : isEnterpriseGlass
+    ? "light"
+    : profile.color_mode === "glass" || profile.color_mode === "business-glass"
     ? "system"
     : profile.color_mode;
 
   /* ---------------- Surface styles ---------------- */
 
-  const cardSurfaceClass = isGlassMode
-    ? "bg-gradient-to-b from-slate-900/90 via-indigo-950/90 to-slate-950/95 backdrop-blur-2xl border border-white/20 ring-1 ring-white/10 text-white shadow-2xl"
-    : "glass-card bg-white/70 dark:bg-dark-900/70 backdrop-blur-2xl shadow-2xl border border-white/50 dark:border-white/10 text-slate-900 dark:text-white";
+  let cardSurfaceClass = "glass-card bg-white/70 dark:bg-dark-900/70 backdrop-blur-2xl shadow-2xl border border-white/50 dark:border-white/10 text-slate-900 dark:text-white";
+  if (isEnterpriseGlass) {
+    cardSurfaceClass = "bg-white/70 backdrop-blur-xl border border-slate-200/70 ring-1 ring-white/70 text-slate-900 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.35)]";
+  } else if (isGlassMode) {
+    cardSurfaceClass = "bg-gradient-to-b from-slate-900/90 via-indigo-950/90 to-slate-950/95 backdrop-blur-2xl border border-white/20 ring-1 ring-white/10 text-white shadow-2xl";
+  }
 
   const avatarBorderClass = isGlassMode
     ? "border-slate-900"
@@ -226,7 +271,9 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
     : "bg-slate-200/50 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10";
 
   const bannerAccent = THEME_BANNER_ACCENTS[themeId];
-
+  const primaryButtonClass = isEnterpriseGlass
+    ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/20"
+    : THEME_BUTTONS[themeId] || THEME_BUTTONS.default;
   const isDemo = tier === "demo";
 
   const verifiedBadge = (
@@ -238,28 +285,45 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
 
   return (
     <main
-      className={`min-h-screen relative selection:bg-brand-500/30 ${fontClass} ${
+      style={{ fontFamily }}
+      className={`min-h-screen relative selection:bg-brand-500/30 ${
         isGlassMode ? "dark" : ""
       }`}
     >
       <ProfileThemeOverride mode={effectiveColorMode} />
       <ProfileTracker username={profile.username} />
 
+      {/* Fixed background layer: stays put while the page scrolls.
+          Using `fixed` + overflow-hidden so the blurred blobs never move or cause horizontal scroll. */}
       <div
-        className={`min-h-screen absolute inset-0 -z-10 ${
-          isGlassMode ? "bg-slate-950" : "bg-slate-50 dark:bg-dark-950"
+        aria-hidden="true"
+        className={`fixed inset-0 -z-10 overflow-hidden pointer-events-none ${
+          isGlassMode
+            ? "bg-slate-950"
+            : isEnterpriseGlass
+            ? "bg-gradient-to-br from-slate-100 via-slate-50 to-blue-100"
+            : "bg-slate-50 dark:bg-dark-950"
         }`}
-      />
-      <div className="absolute top-0 w-full h-[500px] bg-gradient-to-b from-brand-500/10 via-brand-500/5 to-transparent pointer-events-none -z-10" />
+      >
+        {/* Soft shapes behind the frosted card so the blur is visible */}
+        {isEnterpriseGlass && (
+          <>
+            <div className="absolute -top-24 -left-24 w-[480px] h-[480px] rounded-full bg-blue-900/15 blur-[120px]" />
+            <div className="absolute top-1/3 -right-24 w-[420px] h-[420px] rounded-full bg-slate-500/20 blur-[120px]" />
+          </>
+        )}
 
-      {/* Background glow in Glass mode */}
-      {isGlassMode && (
-        <div
-          className={`absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full opacity-40 blur-[120px] pointer-events-none -z-10 ${
-            THEME_GLOWS[themeId] ?? THEME_GLOWS.default
-          }`}
-        />
-      )}
+        <div className="absolute top-0 inset-x-0 h-[500px] bg-gradient-to-b from-brand-500/10 via-brand-500/5 to-transparent" />
+
+        {/* Background glow in Glass (midnight) mode */}
+        {isGlassMode && (
+          <div
+            className={`absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full opacity-40 blur-[120px] ${
+              THEME_GLOWS[themeId] ?? THEME_GLOWS.default
+            }`}
+          />
+        )}
+      </div>
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-16 relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-700 ease-out">
         <div className="flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
@@ -276,7 +340,7 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                   {verifiedBadge}
                 </div>
               ) : (
-                <div className={`w-full aspect-[21/9] relative overflow-hidden ${THEME_BANNERS[themeId]}`}>
+                <div className={`w-full aspect-[21/9] relative overflow-hidden ${THEME_BANNERS[themeId] || THEME_BANNERS.default}`}>
                   {bannerAccent && (
                     <>
                       <div className={`absolute inset-0 ${bannerAccent.glow}`} />
@@ -300,7 +364,7 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                         className={`w-28 h-28 object-cover border-[5px] ${avatarBorderClass} shadow-xl rotate-0 group-hover:rotate-3 transition-transform duration-300 bg-white ${shapeClass}`}
                       />
                     ) : (
-                      <div className={`w-28 h-28 bg-slate-100 dark:bg-slate-800 border-[5px] ${avatarBorderClass} shadow-xl flex items-center justify-center text-4xl font-display font-bold text-slate-400 uppercase rotate-0 group-hover:rotate-3 transition-transform duration-300 ${shapeClass}`}>
+                      <div className={`w-28 h-28 bg-slate-100 dark:bg-slate-800 border-[5px] ${avatarBorderClass} shadow-xl flex items-center justify-center text-4xl ${headingFontClass} font-bold text-slate-400 uppercase rotate-0 group-hover:rotate-3 transition-transform duration-300 ${shapeClass}`}>
                         {profile.full_name?.charAt(0) || "U"}
                       </div>
                     )}
@@ -311,7 +375,7 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                 </div>
 
                 <div className="pt-16 w-full flex flex-col items-center">
-                  <h1 className="font-display font-bold text-2xl md:text-3xl tracking-tight">
+                  <h1 className={`${headingFontClass} font-bold text-2xl md:text-3xl tracking-tight`}>
                     {profile.full_name}
                   </h1>
                   <CopyUsernameBadge username={profile.username} />
@@ -332,7 +396,7 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
                   <div className="mt-6 w-full flex items-center gap-2.5">
                     <TrackedVcardButton
                       username={profile.username}
-                      className={`flex-1 py-3.5 px-5 font-semibold text-sm shadow-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${shapeClass} ${THEME_BUTTONS[themeId]}`}
+                      className={`flex-1 py-3.5 px-5 font-semibold text-sm shadow-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${shapeClass} ${primaryButtonClass}`}
                     />
                     <ProfileQrModalButton username={profile.username} fullName={profile.full_name} />
                   </div>
@@ -410,7 +474,7 @@ async function ProfileContent({ paramsPromise }: { paramsPromise: Promise<{ user
             {/* 1. Business Hub */}
             <BusinessHubDisplay profile={profile} services={services || []} />
 
-            {/* 2. Featured Portfolio (tier is passed to support filtering restrictions) */}
+            {/* 2. Featured Portfolio */}
             <PortfolioGallery items={portfolioItems || []} tier={profile.tier} />
 
             {/* 3. Social & Web Links */}
