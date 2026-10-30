@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Plus,
   Trash2,
+  Pencil,
   GripVertical,
   Loader2,
   Globe,
@@ -35,6 +36,7 @@ import {
   deleteLink,
   updateLinkOrder,
 } from "@/app/dashboard/links/actions";
+import { createClient } from "@/lib/supabase/client"; // Needed for updating the specific link
 
 type LinkItem = {
   id: string;
@@ -46,7 +48,6 @@ type LinkItem = {
 
 interface LinksManagerProps {
   initialLinks: LinkItem[];
-  /** Optional plan limit (e.g. TIER_CONFIG[tier].maxSocialLinks). Enforce it on the server too. */
   maxLinks?: number;
 }
 
@@ -68,7 +69,6 @@ const INPUT_CLASS =
 const CARD_CLASS =
   "glass-card p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-900";
 
-// Only plain http(s) links are allowed (blocks javascript:, data:, etc.)
 function isSafeHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -107,12 +107,17 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
   const formRef = useRef<HTMLFormElement>(null);
 
   const [links, setLinks] = useState<LinkItem[]>(initialLinks);
-  // Separate pending states so deleting/reordering doesn't show "Adding..." on the Add button
   const [isAdding, startAdd] = useTransition();
   const [isMutating, startMutate] = useTransition();
   const [isMounted, setIsMounted] = useState(false);
   const [platform, setPlatform] = useState("website");
   const [titleLength, setTitleLength] = useState(0);
+  
+  // EDIT STATE
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -122,20 +127,16 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
   const isBusy = isAdding || isMutating;
   const hasLimit = typeof maxLinks === "number";
   const isAtLimit = hasLimit && links.length >= maxLinks;
-  const currentPlatform =
-    PLATFORMS.find((p) => p.id === platform) ?? PLATFORMS[0];
+  const currentPlatform = PLATFORMS.find((p) => p.id === platform) ?? PLATFORMS[0];
 
-  // Prevent hydration mismatch with drag-and-drop library
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // Keep local list in sync when the server re-sends fresh data (after router.refresh())
   useEffect(() => {
     setLinks(initialLinks);
   }, [initialLinks]);
 
-  // Auto-dismiss feedback banner
   useEffect(() => {
     if (!feedback) return;
     const timer = setTimeout(
@@ -159,7 +160,6 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
     }
 
     const formData = new FormData(e.currentTarget);
-
     const url = String(formData.get("url") || "").trim();
     if (!isSafeHttpUrl(url)) {
       setFeedback({
@@ -168,6 +168,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
       });
       return;
     }
+    
     formData.set("url", url);
     formData.set("title", String(formData.get("title") || "").trim());
     formData.set("position", links.length.toString());
@@ -175,9 +176,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
     startAdd(async () => {
       try {
         const result = await addLink(formData);
-
         if (result?.error) {
-          // The form keeps what the user typed, so nothing is lost on error
           setFeedback({ type: "error", message: result.error });
           return;
         }
@@ -196,21 +195,62 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
     });
   }
 
+  // START EDIT
+  function handleStartEdit(link: LinkItem) {
+    setEditingId(link.id);
+    setEditTitle(link.title);
+    setEditUrl(link.url);
+    setConfirmDeleteId(null);
+    setFeedback(null);
+  }
+
+  // SAVE EDIT
+  function handleSaveEdit(id: string) {
+    if (!editTitle.trim() || !editUrl.trim()) {
+      setFeedback({ type: "error", message: "Title and URL are required." });
+      return;
+    }
+    
+    if (!isSafeHttpUrl(editUrl.trim())) {
+      setFeedback({ type: "error", message: "URL must start with http:// or https://" });
+      return;
+    }
+
+    const supabase = createClient();
+    startMutate(async () => {
+      try {
+        const { error } = await supabase
+          .from("social_links")
+          .update({ title: editTitle.trim(), url: editUrl.trim() })
+          .eq("id", id);
+          
+        if (error) throw error;
+        
+        // Optimistic update
+        setLinks((prev) => 
+          prev.map((l) => l.id === id ? { ...l, title: editTitle.trim(), url: editUrl.trim() } : l)
+        );
+        
+        setEditingId(null);
+        setFeedback({ type: "success", message: "Link updated successfully!" });
+        router.refresh();
+      } catch (err) {
+        setFeedback({ type: "error", message: "Failed to update link. Please try again." });
+      }
+    });
+  }
+
   function handleDeleteLink(id: string) {
     if (isBusy) return;
     setFeedback(null);
     setConfirmDeleteId(null);
 
-    // Optimistic update, with a snapshot so we can roll back on failure
     const previous = links;
     setLinks((prev) => prev.filter((l) => l.id !== id));
 
     startMutate(async () => {
       try {
-        const res = (await deleteLink(id)) as unknown as
-          | { error?: string }
-          | undefined;
-
+        const res = (await deleteLink(id)) as unknown as { error?: string } | undefined;
         if (res?.error) {
           setLinks(previous);
           setFeedback({ type: "error", message: res.error });
@@ -233,6 +273,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
     if (isMutating) return;
 
     setConfirmDeleteId(null);
+    setEditingId(null); // Cancel editing if they drag
 
     const previous = links;
     const items = Array.from(links);
@@ -267,7 +308,6 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
 
   return (
     <div className="space-y-6">
-      {/* Sticky so feedback is visible even when the list is long */}
       {feedback && (
         <div className="sticky top-4 z-30">
           <div className="rounded-xl bg-white dark:bg-dark-900 shadow-lg">
@@ -289,7 +329,6 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
                 type="button"
                 onClick={() => setFeedback(null)}
                 className="p-1 rounded-lg opacity-70 hover:opacity-100 transition cursor-pointer"
-                aria-label="Dismiss message"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -325,11 +364,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <Field
-            id="lm-platform"
-            label="Platform"
-            icon={<currentPlatform.icon className="w-3.5 h-3.5" />}
-          >
+          <Field id="lm-platform" label="Platform" icon={<currentPlatform.icon className="w-3.5 h-3.5" />}>
             <select
               id="lm-platform"
               name="platform"
@@ -339,9 +374,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
               className={`${INPUT_CLASS} cursor-pointer`}
             >
               {PLATFORMS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
           </Field>
@@ -359,9 +392,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
             />
             <p
               className={`text-[11px] text-right ${
-                titleLength >= TITLE_MAX
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-slate-400"
+                titleLength >= TITLE_MAX ? "text-amber-600 dark:text-amber-400" : "text-slate-400"
               }`}
             >
               {titleLength}/{TITLE_MAX}
@@ -397,11 +428,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
           disabled={isBusy || isAtLimit}
           className="w-full sm:w-auto sm:ml-auto px-8 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm shadow-md shadow-brand-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
         >
-          {isAdding ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Plus className="w-4 h-4" />
-          )}
+          {isAdding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
           {isAdding ? "Adding..." : "Add Link"}
         </button>
       </form>
@@ -447,62 +474,102 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
                   )}
 
                   {links.map((link, index) => {
-                    const Icon =
-                      PLATFORMS.find((p) => p.id === link.platform)?.icon ||
-                      Globe;
+                    const Icon = PLATFORMS.find((p) => p.id === link.platform)?.icon || Globe;
                     const isConfirmingDelete = confirmDeleteId === link.id;
+                    const isEditing = editingId === link.id;
 
                     return (
                       <Draggable
                         key={link.id}
                         draggableId={link.id}
                         index={index}
-                        isDragDisabled={isMutating}
+                        isDragDisabled={isMutating || isEditing}
                       >
                         {(provided, snapshot) => (
                           <div
                             ref={provided.innerRef}
                             {...provided.draggableProps}
-                            className={`flex items-center gap-4 p-4 bg-white dark:bg-dark-900 rounded-2xl border ${
+                            className={`flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-white dark:bg-dark-900 rounded-2xl border ${
                               snapshot.isDragging
                                 ? "border-brand-500 shadow-2xl scale-[1.02]"
                                 : "border-slate-200 dark:border-white/10 shadow-sm"
                             } transition-all`}
                           >
-                            <div
-                              {...provided.dragHandleProps}
-                              className="text-slate-400 hover:text-brand-500 cursor-grab active:cursor-grabbing shrink-0 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
-                              aria-label={`Drag to reorder ${link.title}`}
-                            >
-                              <GripVertical className="w-5 h-5" />
+                            <div className="flex items-center gap-4 flex-1 w-full">
+                              <div
+                                {...provided.dragHandleProps}
+                                className={`text-slate-400 hover:text-brand-500 cursor-grab active:cursor-grabbing shrink-0 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 ${isEditing ? "opacity-30 cursor-not-allowed pointer-events-none" : ""}`}
+                                aria-label={`Drag to reorder ${link.title}`}
+                              >
+                                <GripVertical className="w-5 h-5" />
+                              </div>
+
+                              <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-dark-950 flex items-center justify-center shrink-0">
+                                <Icon className="w-5 h-5 text-slate-700 dark:text-slate-300" />
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                {isEditing ? (
+                                  <div className="space-y-2 pr-2">
+                                    <input 
+                                      type="text" 
+                                      value={editTitle}
+                                      onChange={(e) => setEditTitle(e.target.value)}
+                                      placeholder="Title"
+                                      className="w-full px-3 py-1.5 text-sm rounded-lg bg-slate-50 dark:bg-dark-950 border border-brand-500/50 outline-none focus:ring-2 focus:ring-brand-500/20" 
+                                    />
+                                    <input 
+                                      type="url" 
+                                      value={editUrl}
+                                      onChange={(e) => setEditUrl(e.target.value)}
+                                      placeholder="https://"
+                                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 outline-none focus:border-brand-500/50" 
+                                    />
+                                  </div>
+                                ) : (
+                                  <>
+                                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                      {link.title}
+                                    </p>
+                                    {isSafeHttpUrl(link.url) ? (
+                                      <a
+                                        href={link.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block text-xs text-slate-500 hover:text-brand-500 hover:underline truncate transition-colors"
+                                      >
+                                        {link.url}
+                                      </a>
+                                    ) : (
+                                      <p className="text-xs text-slate-500 truncate">
+                                        {link.url}
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                             </div>
 
-                            <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-dark-950 flex items-center justify-center shrink-0">
-                              <Icon className="w-5 h-5 text-slate-700 dark:text-slate-300" />
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                                {link.title}
-                              </p>
-                              {isSafeHttpUrl(link.url) ? (
-                                <a
-                                  href={link.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block text-xs text-slate-500 hover:text-brand-500 hover:underline truncate transition-colors"
-                                >
-                                  {link.url}
-                                </a>
-                              ) : (
-                                <p className="text-xs text-slate-500 truncate">
-                                  {link.url}
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-1 shrink-0">
-                              {isConfirmingDelete ? (
+                            <div className="flex items-center gap-1 shrink-0 ml-12 sm:ml-0">
+                              {isEditing ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveEdit(link.id)}
+                                    disabled={isMutating}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition cursor-pointer"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingId(null)}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : isConfirmingDelete ? (
                                 <>
                                   <span className="hidden sm:inline text-xs font-semibold text-rose-600 dark:text-rose-400 mr-1">
                                     Delete?
@@ -511,7 +578,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
                                     type="button"
                                     onClick={() => handleDeleteLink(link.id)}
                                     disabled={isBusy}
-                                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white transition cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+                                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white transition cursor-pointer"
                                   >
                                     Yes
                                   </button>
@@ -524,16 +591,26 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
                                   </button>
                                 </>
                               ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteId(link.id)}
-                                  disabled={isBusy}
-                                  className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                  title="Delete link"
-                                  aria-label={`Delete ${link.title}`}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEdit(link)}
+                                    disabled={isBusy}
+                                    className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 rounded-lg transition-colors cursor-pointer"
+                                    title="Edit link"
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteId(link.id)}
+                                    disabled={isBusy}
+                                    className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                                    title="Delete link"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </>
                               )}
                             </div>
                           </div>

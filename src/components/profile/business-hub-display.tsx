@@ -12,8 +12,10 @@ import {
   Download,
   Eye,
   ExternalLink,
+  Star,
 } from "lucide-react";
 import { trackBusinessHubClick } from "@/app/dashboard/business/actions";
+import type { GoogleReviewItem } from "@/components/dashboard/business-hub-manager";
 
 type ServiceItem = {
   id: string;
@@ -39,6 +41,7 @@ interface BusinessHubDisplayProps {
     catalog_pdf_url?: string | null;
     catalog_cover_url?: string | null;
     catalog_action_type?: string | null;
+    google_reviews?: GoogleReviewItem[] | null;
   };
   services: ServiceItem[];
 }
@@ -71,6 +74,25 @@ function formatPriceDisplay(priceStr: string): string {
   return trimmed;
 }
 
+// Ensure Google Drive file links always resolve to direct download when "download" is selected
+function getResolvedCatalogHref(url: string, isDownload: boolean): string {
+  const trimmed = url.trim();
+  if (!trimmed.includes("drive.google.com")) return trimmed;
+
+  const fileIdMatch =
+    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+
+  if (fileIdMatch?.[1]) {
+    return isDownload
+      ? `https://drive.google.com/uc?export=download&id=${fileIdMatch[1]}`
+      : `https://drive.google.com/file/d/${fileIdMatch[1]}/view`;
+  }
+
+  return trimmed;
+}
+
 export function BusinessHubDisplay({
   profile,
   services,
@@ -86,12 +108,17 @@ export function BusinessHubDisplay({
     )}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
   }
 
+  const googleReviews = Array.isArray(profile.google_reviews)
+    ? profile.google_reviews.slice(0, 6)
+    : [];
+
   const hasServices = services && services.length > 0;
   const hasMap = !!mapSrc;
   const hasAppointments = !!(profile.booking_enabled && profile.booking_url);
   const hasCatalog = !!profile.catalog_pdf_url;
+  const hasReviews = googleReviews.length > 0;
 
-  if (!hasServices && !hasMap && !hasAppointments && !hasCatalog) {
+  if (!hasServices && !hasMap && !hasAppointments && !hasCatalog && !hasReviews) {
     return null;
   }
 
@@ -101,6 +128,9 @@ export function BusinessHubDisplay({
     BOOKING_LABELS[profile.booking_platform || "calendar"] ||
     "Available for Booking";
   const isDownloadCatalog = profile.catalog_action_type === "download";
+  const resolvedCatalogUrl = profile.catalog_pdf_url
+    ? getResolvedCatalogHref(profile.catalog_pdf_url, isDownloadCatalog)
+    : "";
 
   function handleTrackClick(type: "booking" | "catalog") {
     if (!profile.id) return;
@@ -157,7 +187,6 @@ export function BusinessHubDisplay({
           </div>
 
           <div className="grid grid-cols-1 gap-5">
-            {/* APPOINTMENT BOOKING CARD (WITH CLICK TRACKING) */}
             {hasAppointments && (
               <a
                 href={profile.booking_url!}
@@ -201,11 +230,10 @@ export function BusinessHubDisplay({
               </a>
             )}
 
-            {/* DIGITAL CATALOG / MENU CARD (WITH CLICK TRACKING) */}
             {hasCatalog && (
               <a
-                href={profile.catalog_pdf_url!}
-                target="_blank"
+                href={resolvedCatalogUrl}
+                target={isDownloadCatalog ? "_self" : "_blank"}
                 rel="noopener noreferrer"
                 download={isDownloadCatalog ? "" : undefined}
                 onClick={() => handleTrackClick("catalog")}
@@ -213,6 +241,7 @@ export function BusinessHubDisplay({
               >
                 {profile.catalog_cover_url ? (
                   <div className="sm:w-48 md:w-56 h-44 sm:h-auto relative overflow-hidden bg-slate-900 shrink-0 border-b sm:border-b-0 sm:border-r border-slate-200 dark:border-white/10">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={profile.catalog_cover_url}
                       alt={profile.catalog_title || "Catalog Cover"}
@@ -277,13 +306,71 @@ export function BusinessHubDisplay({
         </section>
       )}
 
-      {/* 3. INTERACTIVE STORE LOCATION MAP */}
+      {/* 3. GOOGLE REVIEWS SECTION (UP TO 6 BUSINESSES) */}
+      {hasReviews && (
+        <section>
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
+            <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
+              Google Reviews
+            </h2>
+            <div className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {googleReviews.map((review) => (
+              <a
+                key={review.id}
+                href={review.review_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`group p-5 bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 hover:border-amber-400 dark:hover:border-amber-500/50 shadow-sm hover:shadow-xl transition-all flex flex-col justify-between gap-4 ${shapeClass}`}
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1">
+                      {[...Array(5)].map((_, i) => (
+                        <Star
+                          key={i}
+                          className="w-4 h-4 fill-amber-400 text-amber-400"
+                        />
+                      ))}
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      Rate Us on Google
+                    </span>
+                  </div>
+
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm md:text-base group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors line-clamp-1">
+                    {review.business_name}
+                  </h3>
+
+                  {review.address && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                      {review.address}
+                    </p>
+                  )}
+                </div>
+
+                <div
+                  className={`w-full py-2.5 px-4 bg-amber-500/10 group-hover:bg-amber-500 text-amber-700 dark:text-amber-300 group-hover:text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${shapeClass}`}
+                >
+                  <span>Write a Review</span>
+                  <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                </div>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 4. INTERACTIVE STORE LOCATION MAP */}
       {hasMap && (
         <section>
           <div className="flex items-center gap-4 mb-6">
             <div className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
             <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-              Store Location & Map
+              Location & Map
             </h2>
             <div className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
           </div>

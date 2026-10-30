@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Copy, Check, QrCode, X } from "lucide-react";
+import { Copy, Check, QrCode, X, UserPlus } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { trackLinkClick, trackVcardDownload } from "@/app/[username]/actions";
-import { UserPlus } from "lucide-react";
 
 // 1. Component para sa @username sa ilalim ng pangalan na pwedeng i-copy
 export function CopyUsernameBadge({ username }: { username: string }) {
@@ -111,9 +110,18 @@ export function ProfileQrModalButton({ username, fullName }: { username: string;
 
 export function ProfileThemeOverride({ mode }: { mode: string }) {
   useEffect(() => {
-    if (!mode || mode === "system") return;
-
     const html = document.documentElement;
+    
+    if (!mode || mode === "system") {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        html.classList.add('dark');
+      } else {
+        html.classList.remove('dark');
+      }
+      html.removeAttribute("data-theme");
+      return;
+    }
+
     html.classList.remove("light", "dark");
     html.classList.add(mode);
     html.style.colorScheme = mode;
@@ -123,12 +131,15 @@ export function ProfileThemeOverride({ mode }: { mode: string }) {
   return null;
 }
 
-
 export function TrackedVcardButton({ username, className }: { username: string, className: string }) {
   return (
     <a 
       href={`/api/vcard/${username}`} 
-      onClick={() => trackVcardDownload(username)}
+      download={`${username}.vcf`} // Force browser to directly download the file
+      onClick={() => {
+        // Gumamit tayo ng fire-and-forget para hindi ma-block ng tracking ang download process
+        trackVcardDownload(username).catch(console.error);
+      }}
       className={className}
     >
       <UserPlus className="w-4 h-4" />
@@ -143,7 +154,9 @@ export function TrackedSocialLink({ link, className, children }: { link: any, cl
       href={link.url} 
       target="_blank" 
       rel="noopener noreferrer" 
-      onClick={() => trackLinkClick(link.id)}
+      onClick={() => {
+        trackLinkClick(link.id).catch(console.error);
+      }}
       className={className}
     >
       {children}

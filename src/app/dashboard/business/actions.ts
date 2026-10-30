@@ -30,20 +30,28 @@ function formatGoogleDriveUrl(
   const trimmed = url.trim();
   if (!trimmed) return "";
 
+  // Update: suportahan ang pag-detect kapag folder ang ginamit
+  const isFolder = trimmed.includes("/folders/");
   const fileIdMatch =
     trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
     trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/) ||
     trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
 
   if (fileIdMatch && fileIdMatch[1] && trimmed.includes("drive.google.com")) {
     const fileId = fileIdMatch[1];
-    if (mode === "download") {
+    
+    // Hindi pwedeng idownload nang diretso ang buong folder kaya fallback sa view
+    if (mode === "download" && !isFolder) {
       return `https://drive.google.com/uc?export=download&id=${fileId}`;
     }
     if (mode === "image") {
       return `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
     }
-    return `https://drive.google.com/file/d/${fileId}/preview`;
+    
+    return isFolder 
+      ? `https://drive.google.com/drive/folders/${fileId}`
+      : `https://drive.google.com/file/d/${fileId}/preview`;
   }
 
   return trimmed;
@@ -135,7 +143,7 @@ export async function updateServiceOrder(items: { id: string; position: number }
   return { success: true };
 }
 
-// 5. Update Map, Appointments, or Catalog Settings (Direct URLs + GDrive Formatter)
+// 5. Update Map, Appointments, Catalog, or Google Reviews Settings
 export async function updateBusinessSettings(formData: FormData) {
   const { supabase, user, username, error: authError } = await verifyPremiumUser();
   if (authError || !user) return { error: authError };
@@ -182,6 +190,20 @@ export async function updateBusinessSettings(formData: FormData) {
     updates.catalog_action_type = actionType;
     updates.catalog_pdf_url = formatGoogleDriveUrl(rawPdfUrl, actionType);
     updates.catalog_cover_url = formatGoogleDriveUrl(rawCoverUrl, "image");
+  } else if (section === "reviews") {
+    const rawReviews = String(formData.get("google_reviews") || "[]");
+    let parsedReviews = [];
+    try {
+      parsedReviews = JSON.parse(rawReviews);
+      if (!Array.isArray(parsedReviews)) parsedReviews = [];
+    } catch {
+      return { error: "Invalid review links data." };
+    }
+
+    if (parsedReviews.length > 6) {
+      return { error: "You can only save up to 6 Google Review business links." };
+    }
+    updates.google_reviews = parsedReviews;
   }
 
   const { error } = await supabase

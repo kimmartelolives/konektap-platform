@@ -3,15 +3,23 @@
 import * as React from "react";
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
+import { usePathname } from "next/navigation";
 
-export function ThemeToggle() {
+// Inner component kung saan ligtas na magagamit ang usePathname
+function ThemeToggleInner() {
   const { setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
+  const pathname = usePathname();
 
   // Prevent hydration mismatch by only rendering the icon after the client has mounted
   React.useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Itatago ang button kapag nasa public profile (URL na nagsisimula sa "/@")
+  if (pathname?.startsWith("/@")) {
+    return null;
+  }
 
   if (!mounted) {
     return <div className="w-10 h-10 rounded-xl" />; // Layout placeholder
@@ -29,5 +37,14 @@ export function ThemeToggle() {
         <Moon className="w-5 h-5 text-indigo-600" />
       )}
     </button>
+  );
+}
+
+// Ang main component na ini-export ay ibabalot ang inner logic sa Suspense
+export function ThemeToggle() {
+  return (
+    <React.Suspense fallback={<div className="w-10 h-10 rounded-xl" />}>
+      <ThemeToggleInner />
+    </React.Suspense>
   );
 }

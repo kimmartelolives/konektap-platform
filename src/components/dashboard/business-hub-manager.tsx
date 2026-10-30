@@ -25,6 +25,9 @@ import {
   Eye,
   MousePointerClick,
   Wand2,
+  Star,
+  Search,
+  Building2,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -48,6 +51,25 @@ type ServiceItem = {
   position: number;
 };
 
+export type GoogleReviewItem = {
+  id: string;
+  business_name: string;
+  address: string;
+  review_url: string;
+  place_id?: string;
+  rating?: number;
+};
+
+type PlaceSearchCandidate = {
+  place_id: string;
+  name: string;
+  address: string;
+  rating?: number;
+  user_ratings_total?: number;
+  category?: string;
+  review_url: string;
+};
+
 interface BusinessHubManagerProps {
   initialServices: ServiceItem[];
   profile: {
@@ -65,12 +87,14 @@ interface BusinessHubManagerProps {
     catalog_cover_url?: string | null;
     catalog_action_type?: string | null;
     catalog_clicks?: number | null;
+    google_reviews?: GoogleReviewItem[] | null;
   };
 }
 
-type TabType = "services" | "map" | "appointments" | "catalog";
-// Which request is running, so only the button that started it shows a spinner
+type TabType = "services" | "map" | "appointments" | "catalog" | "reviews";
 type BusyAction = "add" | "update" | "delete" | "reorder" | "settings" | null;
+
+const MAX_GOOGLE_REVIEWS = 6;
 
 const BOOKING_PLATFORMS = [
   { id: "calendar", label: "Calendly / Cal.com", icon: Calendar },
@@ -79,7 +103,6 @@ const BOOKING_PLATFORMS = [
   { id: "inperson", label: "In-Person / Studio Visit", icon: Users },
 ] as const;
 
-// Shared with every text field so they all look and behave the same
 const INPUT_CLASS =
   "w-full px-4 py-2.5 rounded-xl bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-sm text-slate-900 dark:text-white outline-none transition-colors";
 
@@ -163,7 +186,6 @@ function formatPriceDisplay(priceStr: string): string {
   return trimmed;
 }
 
-// Helper: Extract Google Drive File ID and convert to direct View, Download, or Thumbnail URL
 function formatGoogleDriveLink(
   inputUrl: string,
   mode: "view" | "download" | "image"
@@ -197,6 +219,62 @@ function formatGoogleDriveLink(
     url: formatted,
     wasConverted: formatted !== trimmed,
   };
+}
+
+// Helper: Auto-convert Place ID, Maps links, CID, or business info to Direct Google Review URL
+function resolveGoogleReviewUrl(rawInput: string, businessName: string): string {
+  const trimmed = rawInput.trim();
+
+  // 1. Kung Place ID ang inilagay nang direkta (nagsisimula sa ChIJ)
+  if (/^ChI[a-zA-Z0-9_-]{10,}$/.test(trimmed)) {
+    return `https://search.google.com/local/writereview?placeid=${trimmed}`;
+  }
+
+  // 2. Kung may placeid parameter sa URL
+  const placeIdParam = trimmed.match(/[?&]placeid=([a-zA-Z0-9_-]+)/i);
+  if (placeIdParam?.[1]) {
+    return `https://search.google.com/local/writereview?placeid=${placeIdParam[1]}`;
+  }
+
+  // 3. Kung may nakapaloob na ChIJ Place ID sa loob ng mahabang URL string
+  const embeddedPlaceId = trimmed.match(/(ChIJ[a-zA-Z0-9_-]{15,})/);
+  if (embeddedPlaceId?.[1]) {
+    return `https://search.google.com/local/writereview?placeid=${embeddedPlaceId[1]}`;
+  }
+
+  // 4. Kung short review link mula sa Google Business Profile (g.page/.../review)
+  if (trimmed.includes("g.page") || trimmed.includes("/review")) {
+    return isSafeHttpUrl(trimmed) ? trimmed : `https://${trimmed.replace(/^https?:\/\//, "")}`;
+  }
+
+  // 5. Kung may Google Customer ID (CID / lrd parameter)
+  const lrdMatch = trimmed.match(/[?&]lrd=([0-9a-zA-Z:,_-]+)/i);
+  if (lrdMatch?.[1]) {
+    const parts = lrdMatch[1].split(",");
+    return `https://search.google.com/local/writereview?placeid=${parts[0]}`;
+  }
+
+  // 6. Kung plain Google Maps link na may place name, i-format gamit ang action parameter
+  if (isSafeHttpUrl(trimmed)) {
+    try {
+      const urlObj = new URL(trimmed);
+      if (urlObj.hostname.includes("google.com")) {
+        const query = urlObj.searchParams.get("query") || urlObj.searchParams.get("q");
+        if (query) {
+          return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}&query_place_id=${query}`;
+        }
+      }
+    } catch {
+      // Fall through kung may error sa parsing
+    }
+    return trimmed;
+  }
+
+  // 7. Fallback: Search directed with review prompt intent
+  const targetName = trimmed || businessName;
+  return `https://www.google.com/search?q=${encodeURIComponent(
+    `${targetName} write a review`
+  )}`;
 }
 
 function CharCount({ value, max }: { value: number; max: number }) {
@@ -272,8 +350,20 @@ export function BusinessHubManager({
   );
   const [gdriveNotice, setGdriveNotice] = useState<string | null>(null);
 
+  // GOOGLE REVIEWS STATES (Max 6 businesses)
+  const [googleReviews, setGoogleReviews] = useState<GoogleReviewItem[]>(
+    Array.isArray(profile?.google_reviews) ? profile.google_reviews : []
+  );
+  const [businessSearchQuery, setBusinessSearchQuery] = useState("");
+  const [searchCandidates, setSearchCandidates] = useState<PlaceSearchCandidate[]>([]);
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] =
+    useState<PlaceSearchCandidate | null>(null);
+  const [customReviewUrlOrPlaceId, setCustomReviewUrlOrPlaceId] = useState("");
+
   const debouncedAddress = useDebouncedValue(locationAddress, 600);
   const debouncedEmbed = useDebouncedValue(mapEmbedInput, 600);
+  const debouncedBusinessQuery = useDebouncedValue(businessSearchQuery, 450);
 
   useEffect(() => {
     setIsMounted(true);
@@ -284,6 +374,12 @@ export function BusinessHubManager({
   }, [initialServices]);
 
   useEffect(() => {
+    if (Array.isArray(profile?.google_reviews)) {
+      setGoogleReviews(profile.google_reviews);
+    }
+  }, [profile?.google_reviews]);
+
+  useEffect(() => {
     if (!feedback) return;
     const timer = setTimeout(
       () => setFeedback(null),
@@ -292,7 +388,6 @@ export function BusinessHubManager({
     return () => clearTimeout(timer);
   }, [feedback]);
 
-  // Escape cancels a pending delete confirmation
   useEffect(() => {
     if (!confirmDeleteId) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -302,18 +397,49 @@ export function BusinessHubManager({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [confirmDeleteId]);
 
-  // Auto-dismiss the Google Drive conversion notice
   useEffect(() => {
     if (!gdriveNotice) return;
     const timer = setTimeout(() => setGdriveNotice(null), 6000);
     return () => clearTimeout(timer);
   }, [gdriveNotice]);
 
+  // Smart Search Effect para sa Google Business Lookup
+  useEffect(() => {
+    const q = debouncedBusinessQuery.trim();
+    if (q.length < 2) {
+      setSearchCandidates([]);
+      setIsSearchingPlaces(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingPlaces(true);
+
+    fetch(`/api/places/search?q=${encodeURIComponent(q)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) {
+          setSearchCandidates(Array.isArray(data.results) ? data.results : []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSearchCandidates([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsSearchingPlaces(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedBusinessQuery]);
+
   const tabs = [
     { id: "services", label: "Services & Pricing", icon: Briefcase },
     { id: "map", label: "Location & Map", icon: MapPin },
     { id: "appointments", label: "Appointments", icon: Calendar },
     { id: "catalog", label: "PDF Catalog / Menu", icon: FileText },
+    { id: "reviews", label: "Google Reviews", icon: Star },
   ] as const;
 
   const previewMapSrc = getResolvedMapSrc(debouncedEmbed, debouncedAddress);
@@ -371,6 +497,77 @@ export function BusinessHubManager({
     }
   }
 
+  // GOOGLE REVIEW HANDLERS
+  function handleConfirmAddReviewBusiness() {
+    if (!selectedCandidate) return;
+    if (googleReviews.length >= MAX_GOOGLE_REVIEWS) {
+      setFeedback({
+        type: "error",
+        message: `Hanggang ${MAX_GOOGLE_REVIEWS} na negosyo lamang ang pwedeng ilagay.`,
+      });
+      return;
+    }
+
+    const finalReviewUrl = customReviewUrlOrPlaceId.trim()
+      ? resolveGoogleReviewUrl(customReviewUrlOrPlaceId, selectedCandidate.name)
+      : selectedCandidate.review_url;
+
+    const newItem: GoogleReviewItem = {
+      id: `rev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      business_name: selectedCandidate.name,
+      address: selectedCandidate.address,
+      review_url: finalReviewUrl,
+      place_id: selectedCandidate.place_id,
+      rating: selectedCandidate.rating,
+    };
+
+    const nextReviews = [...googleReviews, newItem];
+    setGoogleReviews(nextReviews);
+    setSelectedCandidate(null);
+    setBusinessSearchQuery("");
+    setSearchCandidates([]);
+    setCustomReviewUrlOrPlaceId("");
+
+    saveGoogleReviewsToServer(nextReviews, "Google Review link added and saved!");
+  }
+
+  function handleRemoveReviewBusiness(id: string) {
+    const nextReviews = googleReviews.filter((item) => item.id !== id);
+    setGoogleReviews(nextReviews);
+    saveGoogleReviewsToServer(nextReviews, "Google Review link removed.");
+  }
+
+  function saveGoogleReviewsToServer(
+    updatedList: GoogleReviewItem[],
+    successMsg: string
+  ) {
+    setFeedback(null);
+    setBusyAction("settings");
+
+    const formData = new FormData();
+    formData.append("section", "reviews");
+    formData.append("google_reviews", JSON.stringify(updatedList));
+
+    startTransition(async () => {
+      try {
+        const result = await updateBusinessSettings(formData);
+        if (result?.error) {
+          setFeedback({ type: "error", message: result.error });
+          return;
+        }
+        setFeedback({ type: "success", message: successMsg });
+        router.refresh();
+      } catch {
+        setFeedback({
+          type: "error",
+          message: "Could not save Google Reviews. Please try again.",
+        });
+      } finally {
+        setBusyAction(null);
+      }
+    });
+  }
+
   function startEditing(service: ServiceItem) {
     setEditingId(service.id);
     setEditTitle(service.title);
@@ -404,7 +601,7 @@ export function BusinessHubManager({
 
   function handleAddService(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (isBusy) return; // ignore double submits while a request is running
+    if (isBusy) return;
     setFeedback(null);
     const formElement = e.currentTarget;
     const formData = new FormData(formElement);
@@ -450,7 +647,6 @@ export function BusinessHubManager({
     formData.append("price", editPrice.trim());
     formData.append("description", editDescription.trim());
 
-    // Optimistic update, with a snapshot so we can roll back on failure
     const previous = services;
     setServices((prev) =>
       prev.map((item) =>
@@ -524,7 +720,6 @@ export function BusinessHubManager({
   }
 
   function handleDragEnd(result: DropResult) {
-    // Dragging is disabled while busy, so this is only a safety net
     if (isBusy) return;
     if (!result.destination) return;
     if (result.destination.index === result.source.index) return;
@@ -647,7 +842,7 @@ export function BusinessHubManager({
   return (
     <div className="space-y-6">
       {/* CLICK & CONVERSION ANALYTICS SUMMARY */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="p-4 rounded-2xl bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -689,6 +884,20 @@ export function BusinessHubManager({
             <FileText className="w-5 h-5" />
           </div>
         </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Google Review Links
+            </p>
+            <p className="text-2xl font-display font-bold text-amber-500 mt-0.5">
+              {googleReviews.length}/{MAX_GOOGLE_REVIEWS}
+            </p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+            <Star className="w-5 h-5 fill-amber-500" />
+          </div>
+        </div>
       </div>
 
       {/* TAB NAVIGATION */}
@@ -722,7 +931,6 @@ export function BusinessHubManager({
         })}
       </div>
 
-      {/* Sticky so feedback stays visible even when the user has scrolled down a long form or list */}
       {feedback && (
         <div className="sticky top-4 z-30">
           <div className="rounded-2xl bg-white dark:bg-dark-900 shadow-lg">
@@ -755,16 +963,21 @@ export function BusinessHubManager({
 
       {/* TAB 1: SERVICES & PRICING */}
       {activeTab === "services" && (
-        <div role="tabpanel" id="bh-panel-services" aria-labelledby="bh-tab-services" className="space-y-6">
+        <div
+          role="tabpanel"
+          id="bh-panel-services"
+          aria-labelledby="bh-tab-services"
+          className="space-y-6"
+        >
           <form
             onSubmit={handleAddService}
             className="glass-card p-6 rounded-3xl shadow-xl space-y-4 border border-slate-200 dark:border-white/10"
           >
             <div>
               <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-<Briefcase className="w-5 h-5 text-brand-500 shrink-0" />
-Add Service or Package
-</h3>
+                <Briefcase className="w-5 h-5 text-brand-500 shrink-0" />
+                Add Service or Package
+              </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Showcase your offerings and rate cards directly on your public profile.
               </p>
@@ -772,13 +985,16 @@ Add Service or Package
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label htmlFor="bh-service-title" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Service Name
-</label>
+                <label
+                  htmlFor="bh-service-title"
+                  className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  Service Name
+                </label>
                 <input
                   id="bh-service-title"
- autoComplete="off"
- name="title"
+                  autoComplete="off"
+                  name="title"
                   required
                   maxLength={80}
                   placeholder="e.g. Full Web Application Setup"
@@ -786,13 +1002,16 @@ Service Name
                 />
               </div>
               <div className="space-y-1.5">
-                <label htmlFor="bh-service-price" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Price / Rate
-</label>
+                <label
+                  htmlFor="bh-service-price"
+                  className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  Price / Rate
+                </label>
                 <input
                   id="bh-service-price"
- autoComplete="off"
- name="price"
+                  autoComplete="off"
+                  name="price"
                   required
                   maxLength={40}
                   placeholder="e.g. 15000 or Starts at ₱1,500"
@@ -802,28 +1021,31 @@ Price / Rate
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="bh-service-description" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Short Description (Optional)
-</label>
+              <label
+                htmlFor="bh-service-description"
+                className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+              >
+                Short Description (Optional)
+              </label>
               <textarea
                 id="bh-service-description"
- name="description"
+                name="description"
                 rows={2}
                 maxLength={240}
                 onChange={(e) => setNewDescLength(e.target.value.length)}
                 placeholder="Briefly describe what is included in this service..."
-className={`${INPUT_CLASS} resize-none`}
-/>
-<CharCount value={newDescLength} max={240} />
+                className={`${INPUT_CLASS} resize-none`}
+              />
+              <CharCount value={newDescLength} max={240} />
             </div>
 
             <button type="submit" disabled={isBusy} className={SUBMIT_BTN_CLASS}>
               {busyAction === "add" ? (
-<Loader2 className="w-4 h-4 animate-spin" />
-) : (
-<Plus className="w-4 h-4" />
-)}
-{busyAction === "add" ? "Adding..." : "Add Service"}
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+              {busyAction === "add" ? "Adding..." : "Add Service"}
             </button>
           </form>
 
@@ -887,14 +1109,17 @@ className={`${INPUT_CLASS} resize-none`}
                                   >
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                       <div className="space-y-1">
-                                        <label htmlFor="bh-edit-title" className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-Service Name
-</label>
+                                        <label
+                                          htmlFor="bh-edit-title"
+                                          className="text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+                                        >
+                                          Service Name
+                                        </label>
                                         <input
                                           autoFocus
                                           id="bh-edit-title"
- autoComplete="off"
- value={editTitle}
+                                          autoComplete="off"
+                                          value={editTitle}
                                           maxLength={80}
                                           onChange={(e) =>
                                             setEditTitle(e.target.value)
@@ -904,13 +1129,16 @@ Service Name
                                         />
                                       </div>
                                       <div className="space-y-1">
-                                        <label htmlFor="bh-edit-price" className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-Price / Rate
-</label>
+                                        <label
+                                          htmlFor="bh-edit-price"
+                                          className="text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+                                        >
+                                          Price / Rate
+                                        </label>
                                         <input
                                           id="bh-edit-price"
- autoComplete="off"
- value={editPrice}
+                                          autoComplete="off"
+                                          value={editPrice}
                                           maxLength={40}
                                           onChange={(e) =>
                                             setEditPrice(e.target.value)
@@ -922,21 +1150,27 @@ Price / Rate
                                     </div>
 
                                     <div className="space-y-1">
-                                      <label htmlFor="bh-edit-description" className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-Description (Optional)
-</label>
+                                      <label
+                                        htmlFor="bh-edit-description"
+                                        className="text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+                                      >
+                                        Description (Optional)
+                                      </label>
                                       <textarea
                                         rows={2}
                                         id="bh-edit-description"
- value={editDescription}
+                                        value={editDescription}
                                         maxLength={240}
                                         onChange={(e) =>
                                           setEditDescription(e.target.value)
                                         }
                                         placeholder="Short description..."
-className={`${EDIT_INPUT_CLASS} resize-none`}
-/>
-<CharCount value={editDescription.length} max={240} />
+                                        className={`${EDIT_INPUT_CLASS} resize-none`}
+                                      />
+                                      <CharCount
+                                        value={editDescription.length}
+                                        max={240}
+                                      />
                                     </div>
 
                                     <div className="flex items-center justify-end gap-2 pt-1">
@@ -954,10 +1188,10 @@ className={`${EDIT_INPUT_CLASS} resize-none`}
                                         onClick={() =>
                                           handleUpdateService(service.id)
                                         }
-                                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-sm transition cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed ${FOCUS_RING}`}
+                                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-sm transition cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed`}
                                       >
                                         {busyAction === "update" ? (
-<Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                         ) : (
                                           <Check className="w-3.5 h-3.5" />
                                         )}
@@ -997,19 +1231,19 @@ className={`${EDIT_INPUT_CLASS} resize-none`}
                                       {isConfirmingDelete ? (
                                         <>
                                           <span
- role="alert"
- className="text-xs font-semibold text-rose-600 dark:text-rose-400 mr-1"
- >
- Delete this service?
- </span>
+                                            role="alert"
+                                            className="text-xs font-semibold text-rose-600 dark:text-rose-400 mr-1"
+                                          >
+                                            Delete this service?
+                                          </span>
                                           <button
                                             type="button"
                                             onClick={() =>
                                               handleDeleteService(service.id)
                                             }
- disabled={isBusy}
- autoFocus
-                                            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white transition cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed ${FOCUS_RING}`}
+                                            disabled={isBusy}
+                                            autoFocus
+                                            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white transition cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed`}
                                           >
                                             Yes, delete
                                           </button>
@@ -1039,10 +1273,10 @@ className={`${EDIT_INPUT_CLASS} resize-none`}
                                             onClick={() =>
                                               setConfirmDeleteId(service.id)
                                             }
-                                            className={`p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed ${FOCUS_RING}`}
+                                            className={`p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer ${FOCUS_RING} disabled:opacity-60 disabled:cursor-not-allowed`}
                                             title="Delete service"
                                             aria-label={`Delete ${service.title}`}
- disabled={isBusy}
+                                            disabled={isBusy}
                                           >
                                             <Trash2 className="w-4 h-4" />
                                           </button>
@@ -1068,56 +1302,59 @@ className={`${EDIT_INPUT_CLASS} resize-none`}
 
       {/* TAB 2: LOCATION & MAP */}
       {activeTab === "map" && (
-        <form role="tabpanel" id="bh-panel-map" aria-labelledby="bh-tab-map"
+        <form
+          role="tabpanel"
+          id="bh-panel-map"
+          aria-labelledby="bh-tab-map"
           onSubmit={handleSaveSettings}
           className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10"
         >
           <input type="hidden" name="section" value="map" />
           <div>
             <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-<MapPin className="w-5 h-5 text-brand-500 shrink-0" />
-Store Location & Map
-</h3>
+              <MapPin className="w-5 h-5 text-brand-500 shrink-0" />
+              Store Location & Map
+            </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Display your physical store, studio, or office address and an interactive Google Map on your card.
             </p>
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="bh-location-address" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Search Location / Address / Landmark
-</label>
+            <label
+              htmlFor="bh-location-address"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              Search Location / Address / Landmark
+            </label>
             <input
               id="bh-location-address"
- autoComplete="off"
- name="location_address"
+              autoComplete="off"
+              name="location_address"
               value={locationAddress}
               onChange={(e) => setLocationAddress(e.target.value)}
-              placeholder="e.g. 435 Illang-illang St. Imus City, Cavite"
+              placeholder="e.g. General Trias, Cavite"
               className={INPUT_CLASS}
             />
-            <p className="text-[11px] text-slate-400">
-              Type your specific store name or address here to automatically generate the live Google Map below.
-            </p>
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="bh-map-embed" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Custom Google Maps Embed URL or iframe Code (Optional)
-</label>
+            <label
+              htmlFor="bh-map-embed"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              Custom Google Maps Embed URL or iframe Code (Optional)
+            </label>
             <input
               id="bh-map-embed"
- autoComplete="off"
- spellCheck={false}
- name="map_embed_url"
+              autoComplete="off"
+              spellCheck={false}
+              name="map_embed_url"
               value={mapEmbedInput}
               onChange={(e) => setMapEmbedInput(e.target.value)}
               placeholder="https://www.google.com/maps/embed?pb=... or paste full <iframe> code"
               className={INPUT_CLASS}
             />
-            <p className="text-[11px] text-slate-400">
-              Tip: Go to Google Maps, click <strong>Share → Embed a map</strong>, and paste the URL or iframe code here for an exact custom pin.
-            </p>
 
             {isShortLinkWarning && (
               <p className="flex items-start gap-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
@@ -1166,12 +1403,6 @@ Custom Google Maps Embed URL or iframe Code (Optional)
                   title="Google Maps Location Preview"
                   className="w-full h-[260px]"
                 />
-                {locationAddress && (
-                  <div className="px-4 py-3 bg-white dark:bg-dark-900 border-t border-slate-200 dark:border-white/10 flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
-                    <MapPin className="w-4 h-4 text-brand-500 shrink-0" />
-                    <span className="truncate">{locationAddress}</span>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed border-slate-200 dark:border-white/10 text-center">
@@ -1184,15 +1415,22 @@ Custom Google Maps Embed URL or iframe Code (Optional)
           </div>
 
           <button type="submit" disabled={isBusy} className={SUBMIT_BTN_CLASS}>
-            {busyAction === "settings" && <Loader2 className="w-4 h-4 animate-spin" />}
-            {busyAction === "settings" ? "Saving Map Settings..." : "Save Location & Map"}
+            {busyAction === "settings" && (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            )}
+            {busyAction === "settings"
+              ? "Saving Map Settings..."
+              : "Save Location & Map"}
           </button>
         </form>
       )}
 
       {/* TAB 3: APPOINTMENTS */}
       {activeTab === "appointments" && (
-        <form role="tabpanel" id="bh-panel-appointments" aria-labelledby="bh-tab-appointments"
+        <form
+          role="tabpanel"
+          id="bh-panel-appointments"
+          aria-labelledby="bh-tab-appointments"
           onSubmit={handleSaveSettings}
           className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10"
         >
@@ -1202,20 +1440,18 @@ Custom Google Maps Embed URL or iframe Code (Optional)
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-<Calendar className="w-5 h-5 text-brand-500 shrink-0" />
-Appointment & Consultation Card
-</h3>
+                <Calendar className="w-5 h-5 text-brand-500 shrink-0" />
+                Appointment & Consultation Card
+              </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Customize a rich booking card so clients can schedule meetings, calls, or reservations directly from your profile.
               </p>
             </div>
-            <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5">
-              <MousePointerClick className="w-4 h-4" />
-              <span>{bookingClicks} Total Booking Clicks</span>
-            </div>
           </div>
 
-          <label className={`flex items-center gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 cursor-pointer ${FOCUS_RING}`}>
+          <label
+            className={`flex items-center gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 cursor-pointer ${FOCUS_RING}`}
+          >
             <input
               type="checkbox"
               name="booking_enabled"
@@ -1234,14 +1470,17 @@ Appointment & Consultation Card
           </label>
 
           <div className="space-y-2">
-            <span id="bh-booking-type-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-Meeting / Booking Type Icon
-</span>
+            <span
+              id="bh-booking-type-label"
+              className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              Meeting / Booking Type Icon
+            </span>
             <div
- role="radiogroup"
- aria-labelledby="bh-booking-type-label"
- className="grid grid-cols-2 sm:grid-cols-4 gap-2.5"
- >
+              role="radiogroup"
+              aria-labelledby="bh-booking-type-label"
+              className="grid grid-cols-2 sm:grid-cols-4 gap-2.5"
+            >
               {BOOKING_PLATFORMS.map((platform) => {
                 const Icon = platform.icon;
                 const isSelected = bookingPlatform === platform.id;
@@ -1250,8 +1489,8 @@ Meeting / Booking Type Icon
                     key={platform.id}
                     type="button"
                     role="radio"
- aria-checked={isSelected}
- onClick={() => setBookingPlatform(platform.id)}
+                    aria-checked={isSelected}
+                    onClick={() => setBookingPlatform(platform.id)}
                     className={`p-3 rounded-2xl border text-left transition-all flex flex-col gap-2 cursor-pointer ${FOCUS_RING} ${
                       isSelected
                         ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400 shadow-sm"
@@ -1270,13 +1509,16 @@ Meeting / Booking Type Icon
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label htmlFor="bh-booking-title" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Card Headline / CTA Title
-</label>
+              <label
+                htmlFor="bh-booking-title"
+                className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+              >
+                Card Headline / CTA Title
+              </label>
               <input
                 id="bh-booking-title"
- autoComplete="off"
- name="booking_title"
+                autoComplete="off"
+                name="booking_title"
                 maxLength={60}
                 value={bookingTitle}
                 onChange={(e) => setBookingTitle(e.target.value)}
@@ -1286,15 +1528,18 @@ Card Headline / CTA Title
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="bh-booking-url" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Booking / Calendar URL
-</label>
+              <label
+                htmlFor="bh-booking-url"
+                className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+              >
+                Booking / Calendar URL
+              </label>
               <input
                 id="bh-booking-url"
- inputMode="url"
- autoComplete="off"
- spellCheck={false}
- name="booking_url"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                name="booking_url"
                 type="url"
                 defaultValue={profile?.booking_url || ""}
                 placeholder="https://calendly.com/your-username"
@@ -1304,64 +1549,42 @@ Booking / Calendar URL
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="bh-booking-description" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Short Subtext / Expectations (Optional)
-</label>
+            <label
+              htmlFor="bh-booking-description"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              Short Subtext / Expectations (Optional)
+            </label>
             <textarea
               id="bh-booking-description"
- name="booking_description"
+              name="booking_description"
               rows={2}
               maxLength={160}
               value={bookingDesc}
               onChange={(e) => setBookingDesc(e.target.value)}
-              placeholder="e.g. Pick a time slot that works best for you to discuss your project requirements and quotation."
-className={`${INPUT_CLASS} resize-none`}
-/>
-<CharCount value={bookingDesc.length} max={160} />
-          </div>
-
-          <div className="space-y-2 pt-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Live Public Card Preview
-            </span>
-            <div className="p-5 rounded-3xl bg-white dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 border border-slate-200 dark:border-white/15 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all">
-              <div className="flex items-start gap-4 flex-1 min-w-0">
-                <div className="w-12 h-12 rounded-2xl bg-brand-50 dark:bg-brand-500/20 border border-brand-100 dark:border-brand-400/30 text-brand-600 dark:text-brand-300 flex items-center justify-center shrink-0">
-                  <SelectedBookingIcon className="w-6 h-6" />
-                </div>
-                <div className="space-y-1 flex-1 min-w-0">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
-                    <Sparkles className="w-3 h-3 shrink-0" />
-                    Available for Booking
-                  </div>
-                  <h4 className="font-bold text-base text-slate-900 dark:text-white line-clamp-2 break-words">
-                    {bookingTitle || "Book an Appointment"}
-                  </h4>
-                  {bookingDesc && (
-                    <p className="text-xs text-slate-500 dark:text-slate-300 leading-relaxed line-clamp-2 break-words max-w-md">
-                      {bookingDesc}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <span className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs shrink-0 shadow-md transition-colors">
-                Schedule Now →
-              </span>
-            </div>
+              placeholder="e.g. Pick a time slot that works best for you..."
+              className={`${INPUT_CLASS} resize-none`}
+            />
+            <CharCount value={bookingDesc.length} max={160} />
           </div>
 
           <button type="submit" disabled={isBusy} className={SUBMIT_BTN_CLASS}>
-            {busyAction === "settings" && <Loader2 className="w-4 h-4 animate-spin" />}
+            {busyAction === "settings" && (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            )}
             {busyAction === "settings"
- ? "Saving Booking Settings..."
+              ? "Saving Booking Settings..."
               : "Save Appointment Settings"}
           </button>
         </form>
       )}
 
-      {/* TAB 4: PDF CATALOG / MENU WITH GOOGLE DRIVE AUTO-FORMATTER */}
+      {/* TAB 4: PDF CATALOG / MENU */}
       {activeTab === "catalog" && (
-        <form role="tabpanel" id="bh-panel-catalog" aria-labelledby="bh-tab-catalog"
+        <form
+          role="tabpanel"
+          id="bh-panel-catalog"
+          aria-labelledby="bh-tab-catalog"
           onSubmit={handleSaveSettings}
           className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10"
         >
@@ -1375,16 +1598,12 @@ className={`${INPUT_CLASS} resize-none`}
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-<FileText className="w-5 h-5 text-brand-500 shrink-0" />
-Featured Catalog / Digital Menu Showcase
-</h3>
+                <FileText className="w-5 h-5 text-brand-500 shrink-0" />
+                Featured Catalog / Digital Menu Showcase
+              </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Add a visual cover image and a direct link to your PDF brochure, restaurant menu, or rate sheet.
               </p>
-            </div>
-            <div className="px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center gap-1.5">
-              <MousePointerClick className="w-4 h-4" />
-              <span>{catalogClicks} Total Catalog Opens</span>
             </div>
           </div>
 
@@ -1398,7 +1617,6 @@ Featured Catalog / Digital Menu Showcase
                 type="button"
                 onClick={() => setGdriveNotice(null)}
                 className={`p-1 opacity-70 hover:opacity-100 cursor-pointer ${FOCUS_RING}`}
-                aria-label="Dismiss notice"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -1407,13 +1625,16 @@ Featured Catalog / Digital Menu Showcase
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label htmlFor="bh-catalog-title" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Catalog / Menu Title
-</label>
+              <label
+                htmlFor="bh-catalog-title"
+                className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+              >
+                Catalog / Menu Title
+              </label>
               <input
                 id="bh-catalog-title"
- autoComplete="off"
- name="catalog_title"
+                autoComplete="off"
+                name="catalog_title"
                 maxLength={60}
                 value={catalogTitle}
                 onChange={(e) => setCatalogTitle(e.target.value)}
@@ -1423,19 +1644,22 @@ Catalog / Menu Title
             </div>
 
             <div className="space-y-1.5">
-              <span id="bh-catalog-action-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-Primary Button Action
-</span>
+              <span
+                id="bh-catalog-action-label"
+                className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+              >
+                Primary Button Action
+              </span>
               <div
- role="radiogroup"
- aria-labelledby="bh-catalog-action-label"
- className="grid grid-cols-2 gap-2"
- >
+                role="radiogroup"
+                aria-labelledby="bh-catalog-action-label"
+                className="grid grid-cols-2 gap-2"
+              >
                 <button
                   type="button"
                   role="radio"
- aria-checked={catalogActionType === "view"}
- onClick={() => handleCatalogActionChange("view")}
+                  aria-checked={catalogActionType === "view"}
+                  onClick={() => handleCatalogActionChange("view")}
                   className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${FOCUS_RING} transition ${
                     catalogActionType === "view"
                       ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400"
@@ -1448,8 +1672,8 @@ Primary Button Action
                 <button
                   type="button"
                   role="radio"
- aria-checked={catalogActionType === "download"}
- onClick={() => handleCatalogActionChange("download")}
+                  aria-checked={catalogActionType === "download"}
+                  onClick={() => handleCatalogActionChange("download")}
                   className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${FOCUS_RING} transition ${
                     catalogActionType === "download"
                       ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400"
@@ -1464,86 +1688,355 @@ Primary Button Action
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="bh-catalog-description" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Short Description (Optional)
-</label>
+            <label
+              htmlFor="bh-catalog-description"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              Short Description (Optional)
+            </label>
             <textarea
               id="bh-catalog-description"
- name="catalog_description"
+              name="catalog_description"
               rows={2}
               maxLength={160}
               value={catalogDesc}
               onChange={(e) => setCatalogDesc(e.target.value)}
               placeholder="e.g. Browse our complete menu, custom packages, and bulk pricing specifications."
-className={`${INPUT_CLASS} resize-none`}
-/>
-<CharCount value={catalogDesc.length} max={160} />
+              className={`${INPUT_CLASS} resize-none`}
+            />
+            <CharCount value={catalogDesc.length} max={160} />
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="bh-catalog-cover" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-Cover Image URL (Supports Google Drive Image Share Links, Imgur, etc.)
-</label>
+            <label
+              htmlFor="bh-catalog-cover"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              Cover Image URL
+            </label>
             <input
               id="bh-catalog-cover"
- inputMode="url"
- autoComplete="off"
- spellCheck={false}
- name="catalog_cover_url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              name="catalog_cover_url"
               type="url"
               value={catalogCoverUrl}
               onChange={(e) => handleCatalogCoverUrlChange(e.target.value)}
               placeholder="Paste Google Drive image link or direct image URL..."
               className={INPUT_CLASS}
             />
-            <p className="text-[11px] text-slate-400">
-              Tip: Paste any public Google Drive image link and it will automatically convert into a direct thumbnail URL.
-            </p>
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="bh-catalog-pdf" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-PDF / Catalog Link (Auto-Formats Google Drive Links)
-</label>
+            <label
+              htmlFor="bh-catalog-pdf"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              PDF / Catalog Link (Auto-Formats Google Drive File Links)
+            </label>
             <input
               id="bh-catalog-pdf"
- inputMode="url"
- autoComplete="off"
- spellCheck={false}
- name="catalog_pdf_url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              name="catalog_pdf_url"
               type="url"
               value={catalogPdfUrl}
               onChange={(e) => handleCatalogPdfUrlChange(e.target.value)}
-              placeholder="Paste Google Drive PDF share link or direct PDF URL..."
+              placeholder="Paste Google Drive PDF file link (e.g. drive.google.com/file/d/...)"
               className={INPUT_CLASS}
             />
-            <p className="text-[11px] text-slate-400">
-              Tip: Upload your PDF to Google Drive (set access to <strong>Anyone with the link</strong>) and paste the link here—we auto-convert it for instant viewing or direct download.
-            </p>
           </div>
 
-          {catalogPdfUrl && isSafeHttpUrl(catalogPdfUrl) && (
-            <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300 truncate">
-                Resolved Link: {catalogPdfUrl}
-              </span>
-              <a
-                href={catalogPdfUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline shrink-0 rounded ${FOCUS_RING}`}
-              >
-                <span>Test Link</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            </div>
-          )}
-
           <button type="submit" disabled={isBusy} className={SUBMIT_BTN_CLASS}>
-            {busyAction === "settings" && <Loader2 className="w-4 h-4 animate-spin" />}
-            {busyAction === "settings" ? "Saving Catalog..." : "Save Catalog Settings"}
+            {busyAction === "settings" && (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            )}
+            {busyAction === "settings"
+              ? "Saving Catalog..."
+              : "Save Catalog Settings"}
           </button>
         </form>
+      )}
+
+      {/* TAB 5: GOOGLE REVIEWS HUB (PREMIUM - UP TO 6 BUSINESSES) */}
+      {activeTab === "reviews" && (
+        <div
+          role="tabpanel"
+          id="bh-panel-reviews"
+          aria-labelledby="bh-tab-reviews"
+          className="space-y-6"
+        >
+          <div className="glass-card p-6 rounded-3xl shadow-xl space-y-5 border border-slate-200 dark:border-white/10">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                  <Star className="w-5 h-5 text-amber-500 fill-amber-500 shrink-0" />
+                  Google Business Review Finder
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Search your business name below, verify your branch/location details, and click <strong>Add Business</strong> to automatically generate a direct Google Review card on your public profile (up to {MAX_GOOGLE_REVIEWS} businesses).
+                </p>
+              </div>
+
+              <span
+                className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${
+                  googleReviews.length >= MAX_GOOGLE_REVIEWS
+                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                    : "bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10"
+                }`}
+              >
+                {googleReviews.length} / {MAX_GOOGLE_REVIEWS} Businesses Added
+              </span>
+            </div>
+
+            {/* STEP 1: SEARCH TEXTBOX */}
+            <div className="space-y-2">
+              <label
+                htmlFor="bh-google-review-search"
+                className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+              >
+                1. Search Your Business Name & City
+              </label>
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="bh-google-review-search"
+                  type="search"
+                  disabled={googleReviews.length >= MAX_GOOGLE_REVIEWS}
+                  value={businessSearchQuery}
+                  onChange={(e) => {
+                    setBusinessSearchQuery(e.target.value);
+                    setSelectedCandidate(null);
+                  }}
+                  placeholder="e.g. Taven Coffee General Trias or Akami Sushi Cavite..."
+                  className={`${INPUT_CLASS} pl-10 pr-10`}
+                />
+                {isSearchingPlaces && (
+                  <Loader2 className="w-4 h-4 text-brand-500 animate-spin absolute right-3.5 top-1/2 -translate-y-1/2" />
+                )}
+              </div>
+            </div>
+
+            {/* STEP 2: MATCHING RESULTS */}
+            {searchCandidates.length > 0 && !selectedCandidate && (
+              <div className="space-y-2 animate-in fade-in duration-200">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  2. Select Your Matching Business
+                </p>
+                <div className="grid grid-cols-1 gap-2.5 max-h-80 overflow-y-auto pr-1">
+                  {searchCandidates.map((candidate) => (
+                    <button
+                      key={candidate.place_id}
+                      type="button"
+                      onClick={() => setSelectedCandidate(candidate)}
+                      className="w-full p-4 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/70 dark:bg-dark-950/70 hover:border-amber-500/60 hover:bg-amber-500/5 text-left transition-all flex items-start justify-between gap-4 cursor-pointer group"
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 mt-0.5">
+                          <Building2 className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-amber-500 transition-colors truncate">
+                              {candidate.name}
+                            </h4>
+                            {candidate.rating && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                                <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                                {candidate.rating}
+                                {candidate.user_ratings_total
+                                  ? ` (${candidate.user_ratings_total})`
+                                  : ""}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
+                            {candidate.address}
+                          </p>
+                          {candidate.category && (
+                            <span className="inline-block mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                              {candidate.category}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <span className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold shrink-0 group-hover:bg-amber-500 group-hover:text-slate-950 transition-colors">
+                        Select →
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: CONFIRMATION & AUTO-GENERATED REVIEW LINK */}
+            {selectedCandidate && (
+              <div className="p-5 rounded-2xl border-2 border-amber-500/50 bg-amber-500/5 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 shadow-md">
+                      <Star className="w-6 h-6 fill-slate-950" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                        Confirm Business Details
+                      </span>
+                      <h4 className="text-base font-bold text-slate-900 dark:text-white">
+                        {selectedCandidate.name}
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        {selectedCandidate.address}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCandidate(null)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+                    title="Change business"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    Optional: Paste Google Place ID or Direct Google Review Link (leave blank to auto-generate)
+                  </label>
+                  <input
+                    type="text"
+                    value={customReviewUrlOrPlaceId}
+                    onChange={(e) => setCustomReviewUrlOrPlaceId(e.target.value)}
+                    placeholder="Auto-generated from Google Business Search (or paste ChIJ... Place ID)"
+                    className={INPUT_CLASS}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-1 flex-wrap">
+                  <a
+                    href={
+                      customReviewUrlOrPlaceId.trim()
+                        ? resolveGoogleReviewUrl(
+                            customReviewUrlOrPlaceId,
+                            selectedCandidate.name
+                          )
+                        : selectedCandidate.review_url
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
+                  >
+                    <span>Test Generated Review Link</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCandidate(null)}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-white/10 transition cursor-pointer"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={handleConfirmAddReviewBusiness}
+                      className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+                    >
+                      {busyAction === "settings" ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Plus className="w-4 h-4" />
+                      )}
+                      <span>Add & Save Review Link</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SAVED GOOGLE REVIEW BUSINESSES LIST */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Active Google Review Cards ({googleReviews.length}/{MAX_GOOGLE_REVIEWS})
+              </h4>
+            </div>
+
+            {googleReviews.length === 0 ? (
+              <div className="glass-card p-10 rounded-3xl border border-dashed border-slate-200 dark:border-white/10 text-center">
+                <Star className="w-8 h-8 text-amber-400 mx-auto mb-2" />
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                  No Google Review links added yet
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-1">
+                  Search your business name above to add up to 6 Google Review cards to your public profile.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {googleReviews.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-5 rounded-3xl bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between gap-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-1 text-amber-400">
+                          {[...Array(5)].map((_, idx) => (
+                            <Star
+                              key={idx}
+                              className="w-3.5 h-3.5 fill-amber-400 text-amber-400"
+                            />
+                          ))}
+                          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 ml-1">
+                            Google Reviews
+                          </span>
+                        </div>
+                        <h4 className="font-bold text-sm md:text-base text-slate-900 dark:text-white truncate">
+                          {item.business_name}
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                          {item.address}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => handleRemoveReviewBusiness(item.id)}
+                        className="p-2 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition cursor-pointer shrink-0"
+                        title="Remove business review link"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-white/5">
+                      <span className="text-[11px] text-slate-400 truncate">
+                        {item.review_url}
+                      </span>
+                      <a
+                        href={item.review_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline shrink-0"
+                      >
+                        <span>Open Link</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
