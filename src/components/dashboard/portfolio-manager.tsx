@@ -65,6 +65,9 @@ const FREE_MAX_ITEMS = 3;
 const PREMIUM_MAX_ITEMS = 20;
 const TITLE_MAX = 80;
 const DESC_MAX = 500;
+const CATEGORY_MAX = 30;
+const CTA_LABEL_MAX = 25;
+const DEFAULT_CTA_LABEL = "View Project";
 
 const QUICK_CATEGORIES = [
   "Web & Software",
@@ -233,6 +236,7 @@ export function PortfolioManager({
   // Live character counters
   const [titleLength, setTitleLength] = useState(0);
   const [descLength, setDescLength] = useState(0);
+  const [ctaLength, setCtaLength] = useState(DEFAULT_CTA_LABEL.length);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -295,6 +299,7 @@ export function PortfolioManager({
     setDirectImageUrlInput("");
     setTitleLength(0);
     setDescLength(0);
+    setCtaLength(DEFAULT_CTA_LABEL.length);
     clearNewImages();
   }
 
@@ -317,7 +322,7 @@ export function PortfolioManager({
       category: "",
       description: "",
       link_url: "",
-      cta_label: "View Project",
+      cta_label: DEFAULT_CTA_LABEL,
       image_urls: [],
       position: items.length,
     });
@@ -333,6 +338,7 @@ export function PortfolioManager({
     setExistingImages(item.image_urls || []);
     setTitleLength(item.title.length);
     setDescLength((item.description || "").length);
+    setCtaLength((item.cta_label || DEFAULT_CTA_LABEL).length);
   }
 
   function handleCancel() {
@@ -530,7 +536,16 @@ export function PortfolioManager({
     }
     formData.set("link_url", linkUrl);
     formData.set("title", String(formData.get("title") || "").trim());
-    formData.set("category", isPremium ? categoryInput.trim() : "");
+    formData.set(
+      "category",
+      isPremium ? categoryInput.trim().slice(0, CATEGORY_MAX) : ""
+    );
+    formData.set(
+      "cta_label",
+      (
+        String(formData.get("cta_label") || "").trim() || DEFAULT_CTA_LABEL
+      ).slice(0, CTA_LABEL_MAX)
+    );
 
     if (totalImages > MAX_IMAGES) {
       setFeedback({
@@ -944,10 +959,14 @@ export function PortfolioManager({
                       name="category"
                       value={categoryInput}
                       onChange={(e) => setCategoryInput(e.target.value)}
-                      maxLength={40}
+                      maxLength={CATEGORY_MAX}
                       placeholder="e.g. 3D Printing & Fabrication"
                       autoComplete="off"
                       className={INPUT_CLASS}
+                    />
+                    <CharCounter
+                      value={categoryInput.length}
+                      max={CATEGORY_MAX}
                     />
                   </Field>
                 ) : (
@@ -1042,12 +1061,14 @@ export function PortfolioManager({
                   <input
                     id="pm-cta-label"
                     name="cta_label"
-                    maxLength={30}
-                    defaultValue={currentItem.cta_label || "View Project"}
+                    maxLength={CTA_LABEL_MAX}
+                    defaultValue={currentItem.cta_label || DEFAULT_CTA_LABEL}
+                    onChange={(e) => setCtaLength(e.target.value.length)}
                     placeholder="e.g. View Live Demo"
                     autoComplete="off"
                     className={INPUT_CLASS}
                   />
+                  <CharCounter value={ctaLength} max={CTA_LABEL_MAX} />
                 </Field>
               </div>
 
@@ -1254,7 +1275,7 @@ export function PortfolioManager({
                                             className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-50 dark:bg-brand-500/10 text-xs font-bold text-brand-600 dark:text-brand-400 hover:bg-brand-100 dark:hover:bg-brand-500/20 transition-colors truncate max-w-[180px]"
                                           >
                                             <span className="truncate">
-                                              {item.cta_label || "View Project"}
+                                              {item.cta_label || DEFAULT_CTA_LABEL}
                                             </span>
                                             <ExternalLink className="w-3.5 h-3.5 shrink-0" />
                                           </a>

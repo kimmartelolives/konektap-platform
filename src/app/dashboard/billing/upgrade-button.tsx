@@ -21,7 +21,7 @@ export function UpgradeButton({ tier, label, isPopular }: UpgradeButtonProps) {
         alert(result.error);
         setIsLoading(false);
       } else if (result?.checkoutUrl) {
-        window.location.href = result.checkoutUrl; // I-redirect sa Xendit
+        window.location.href = result.checkoutUrl;
       }
     } catch (error) {
       alert("Something went wrong. Please try again.");
@@ -33,10 +33,10 @@ export function UpgradeButton({ tier, label, isPopular }: UpgradeButtonProps) {
     <button
       onClick={handleUpgrade}
       disabled={isLoading}
-      className={`w-full py-3 px-4 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed ${
+      className={`w-full py-3 px-4 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed shadow-sm ${
         isPopular
-          ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-500/20"
-          : "bg-white text-slate-900 hover:bg-slate-50"
+          ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/25 active:scale-[0.99]"
+          : "bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900 active:scale-[0.99]"
       }`}
     >
       {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}

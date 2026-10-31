@@ -65,7 +65,7 @@ export default function AdminPricingPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
-            <Tag className="w-8 h-8 text-brand-500" />
+            
             Pricing & Promos
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">

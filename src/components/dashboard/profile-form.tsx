@@ -33,9 +33,17 @@ type ProfileFormProfile = {
 };
 
 const MAX_AVATAR_MB = 2;
-const BIO_MAX = 300;
 const DEMO_LOCK_MESSAGE =
   "Custom profile picture upload requires a Standard or Premium plan.";
+
+// ---- FIELD LIMITS ----
+const USERNAME_MIN = 3;
+const USERNAME_MAX = 30;
+const FULL_NAME_MAX = 60;
+const PROFESSION_MAX = 80;
+const BIO_MAX = 300;
+const PHONE_MAX = 20;
+const EMAIL_MAX = 100;
 
 const INPUT_CLASS =
   "w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-sm text-slate-900 dark:text-white outline-none transition-colors";
@@ -64,6 +72,43 @@ function Field({
   );
 }
 
+function CharCount({ length, max }: { length: number; max: number }) {
+  return (
+    <p
+      className={`text-[11px] text-right ${
+        length >= max ? "text-amber-600 dark:text-amber-400" : "text-slate-400"
+      }`}
+    >
+      {length}/{max}
+    </p>
+  );
+}
+
+// Input na may built-in na character counter
+function CountedInput({
+  maxLength,
+  defaultValue,
+  onChange,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { maxLength: number }) {
+  const [length, setLength] = useState(String(defaultValue ?? "").length);
+
+  return (
+    <>
+      <input
+        {...props}
+        defaultValue={defaultValue}
+        maxLength={maxLength}
+        onChange={(e) => {
+          setLength(e.target.value.length);
+          onChange?.(e);
+        }}
+      />
+      <CharCount length={length} max={maxLength} />
+    </>
+  );
+}
+
 export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
   const [isPending, startTransition] = useTransition();
   const [isCompressing, setIsCompressing] = useState(false);
@@ -80,6 +125,9 @@ export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [bioLength, setBioLength] = useState((profile?.bio || "").length);
+  const [usernameLength, setUsernameLength] = useState(
+    (profile?.username || "").length
+  );
 
   const isDemo = (profile?.tier || "demo") === "demo";
   const isBusy = isPending || isCompressing;
@@ -137,10 +185,14 @@ export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
     setAvatarPreview(url);
   }
 
-  async function handleSubmit(formData: FormData) {
+  // onSubmit (hindi action) para hindi ma-reset ng React 19 ang form
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
     if (isBusy) return;
     setMessage(null);
 
+    // Kunin agad ang FormData bago ang anumang await
+    const formData = new FormData(e.currentTarget);
     const avatarFile = formData.get("avatar");
 
     if (avatarFile instanceof File && avatarFile.size > 0) {
@@ -183,7 +235,7 @@ export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
 
   return (
     <form
-      action={handleSubmit}
+      onSubmit={handleSubmit}
       className="glass-card p-6 md:p-8 rounded-3xl shadow-xl space-y-6"
     >
       {/* Sticky so feedback is visible even when the Save button is far down */}
@@ -316,19 +368,28 @@ export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
             name="username"
             defaultValue={profile?.username || ""}
             required
+            minLength={USERNAME_MIN}
+            maxLength={USERNAME_MAX}
             pattern="[a-zA-Z0-9_]+"
-            title="Only letters, numbers, and underscores allowed"
+            title={`${USERNAME_MIN}-${USERNAME_MAX} characters. Only letters, numbers, and underscores allowed`}
             placeholder="juandelacruz"
             autoCapitalize="none"
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
+            onChange={(e) => setUsernameLength(e.target.value.length)}
             className="min-w-0 flex-1 px-4 py-3 bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 rounded-r-xl focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none text-slate-900 dark:text-white font-mono transition-colors"
           />
         </div>
-        <p className="text-xs text-slate-500">
-          This is your unique NFC tap link. Use only letters, numbers, and underscores.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-xs text-slate-500">
+            This is your unique NFC tap link. {USERNAME_MIN}-{USERNAME_MAX} characters,
+            letters, numbers, and underscores only.
+          </p>
+          <div className="shrink-0">
+            <CharCount length={usernameLength} max={USERNAME_MAX} />
+          </div>
+        </div>
       </div>
 
       {/* PUBLIC INFO */}
@@ -336,11 +397,12 @@ export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
         <h3 className="font-bold text-slate-900 dark:text-white mb-2">Public Information</h3>
 
         <Field id="pf-full-name" label="Full Name" icon={<User className="w-3.5 h-3.5" />}>
-          <input
+          <CountedInput
             id="pf-full-name"
             name="full_name"
             defaultValue={profile?.full_name || ""}
             required
+            maxLength={FULL_NAME_MAX}
             autoComplete="name"
             className={INPUT_CLASS}
           />
@@ -351,10 +413,11 @@ export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
           label="Profession / Tagline"
           icon={<Briefcase className="w-3.5 h-3.5" />}
         >
-          <input
+          <CountedInput
             id="pf-profession"
             name="profession"
             defaultValue={profile?.profession || ""}
+            maxLength={PROFESSION_MAX}
             placeholder="e.g. Full-Stack Software Engineer"
             autoComplete="organization-title"
             className={INPUT_CLASS}
@@ -372,13 +435,7 @@ export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
             placeholder="Write a short bio about what you do..."
             className={`${INPUT_CLASS} resize-none`}
           />
-          <p
-            className={`text-[11px] text-right ${
-              bioLength >= BIO_MAX ? "text-amber-600 dark:text-amber-400" : "text-slate-400"
-            }`}
-          >
-            {bioLength}/{BIO_MAX}
-          </p>
+          <CharCount length={bioLength} max={BIO_MAX} />
         </Field>
       </div>
 
@@ -387,24 +444,28 @@ export function ProfileForm({ profile }: { profile: ProfileFormProfile }) {
         <h3 className="font-bold text-slate-900 dark:text-white mb-2">Direct Contact (vCard)</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <Field id="pf-phone" label="Public Phone" icon={<Phone className="w-3.5 h-3.5" />}>
-            <input
+            <CountedInput
               id="pf-phone"
               name="phone_public"
               type="tel"
               inputMode="tel"
               autoComplete="tel"
               defaultValue={profile?.phone_public || ""}
+              maxLength={PHONE_MAX}
+              pattern="[0-9+\s\-\(\)]*"
+              title="Numbers, spaces, +, -, and parentheses only"
               placeholder="+63 912 345 6789"
               className={INPUT_CLASS}
             />
           </Field>
           <Field id="pf-email" label="Public Email" icon={<Mail className="w-3.5 h-3.5" />}>
-            <input
+            <CountedInput
               id="pf-email"
               name="email_public"
               type="email"
               autoComplete="email"
               defaultValue={profile?.email_public || ""}
+              maxLength={EMAIL_MAX}
               placeholder="hello@example.com"
               className={INPUT_CLASS}
             />

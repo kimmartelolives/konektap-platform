@@ -6,7 +6,7 @@ import {
   AlertCircle,
   CalendarClock,
   CheckCircle2,
-  DollarSign,
+  Banknote,
   ListChecks,
   Loader2,
   RotateCcw,
@@ -34,9 +34,9 @@ type Plan = {
 type FormValues = {
   base_price: string;
   discount_price: string;
-  discount_end_date: string; // datetime-local format, in the viewer's local time
+  discount_end_date: string;
   description: string;
-  features: string; // one feature per line
+  features: string;
 };
 
 type FormErrors = Partial<Record<keyof FormValues, string>>;
@@ -48,6 +48,13 @@ type Feedback = { type: "success" | "error"; message: string };
 
 const DESCRIPTION_MAX = 120;
 const FREE_PLAN_ID = "demo";
+
+// FIX: Sorting dictionary para laging tama ang order (Demo -> Standard -> Premium)
+const PLAN_ORDER: Record<string, number> = {
+  demo: 1,
+  standard: 2,
+  premium: 3,
+};
 
 const INPUT_CLASS =
   "w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 text-sm text-slate-900 dark:text-white outline-none transition-colors";
@@ -64,7 +71,6 @@ const peso = new Intl.NumberFormat("en-PH", {
   maximumFractionDigits: 2,
 });
 
-/** ISO string from the database -> value for <input type="datetime-local"> in local time. */
 function toLocalInput(iso: string | null): string {
   if (!iso) return "";
   const date = new Date(iso);
@@ -93,7 +99,6 @@ function parseFeatures(text: string): string[] {
 function validate(values: FormValues, isFree: boolean): FormErrors {
   const errors: FormErrors = {};
 
-  // The free plan has no price or promo, so only paid plans are checked here.
   if (!isFree) {
     const base = Number(values.base_price);
     const hasPromo = values.discount_price.trim() !== "";
@@ -219,16 +224,22 @@ function PlanCard({
   const [baseline, setBaseline] = useState<FormValues>(() => planToValues(plan));
   const [values, setValues] = useState<FormValues>(baseline);
 
-  // Pick up fresh data when the server sends an updated plan (e.g. after revalidation).
   useEffect(() => {
     const next = planToValues(plan);
     setBaseline(next);
-    setValues(next);
+    setValues((prev) => {
+      const currentIsDirty = (Object.keys(prev) as (keyof FormValues)[]).some(
+        (key) => prev[key] !== baseline[key]
+      );
+      return currentIsDirty ? prev : next;
+    });
   }, [plan]);
 
   const errors = useMemo(() => validate(values, isFree), [values, isFree]);
   const hasErrors = Object.keys(errors).length > 0;
   const isDirty = (Object.keys(values) as (keyof FormValues)[]).some((key) => values[key] !== baseline[key]);
+  
+  // Disable button if not dirty, has errors, OR if the WHOLE page is busy saving ANY plan
   const canSave = isDirty && !hasErrors && !isBusy;
 
   const status: PromoStatus = isFree ? "none" : getPromoStatus(values, errors);
@@ -249,7 +260,6 @@ function PlanCard({
     if (!canSave) return;
 
     const formData = new FormData(e.currentTarget);
-    // Send a timezone-safe timestamp instead of a bare local datetime string.
     formData.set(
       "discount_end_date",
       values.discount_end_date ? new Date(values.discount_end_date).toISOString() : "",
@@ -270,7 +280,6 @@ function PlanCard({
 
   return (
     <form onSubmit={handleSubmit} noValidate className={`${CARD_CLASS} shadow-xl space-y-5`}>
-      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Tag className="w-5 h-5 text-brand-500" />
@@ -287,7 +296,6 @@ function PlanCard({
         </div>
       </div>
 
-      {/* Live summary */}
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-2xl bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 px-4 py-3">
         {isFree ? (
           <>
@@ -320,73 +328,72 @@ function PlanCard({
         )}
       </div>
 
-      {/* Fields */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <input type="hidden" name="id" value={plan.id} />
 
         {!isFree && (
           <>
-        <Field
-          label="Base price (₱)"
-          icon={<DollarSign className="w-3.5 h-3.5" />}
-          htmlFor={`${plan.id}-base_price`}
-          error={errors.base_price}
-        >
-          <input
-            id={`${plan.id}-base_price`}
-            type="number"
-            name="base_price"
-            min={0}
-            step="any"
-            inputMode="decimal"
-            value={values.base_price}
-            onChange={update("base_price")}
-            aria-invalid={!!errors.base_price}
-            aria-describedby={describedBy("base_price")}
-            className={inputClass("base_price")}
-          />
-        </Field>
+            <Field
+              label="Base price (₱)"
+              icon={<Banknote className="w-3.5 h-3.5" />}
+              htmlFor={`${plan.id}-base_price`}
+              error={errors.base_price}
+            >
+              <input
+                id={`${plan.id}-base_price`}
+                type="number"
+                name="base_price"
+                min={0}
+                step="any"
+                inputMode="decimal"
+                value={values.base_price}
+                onChange={update("base_price")}
+                aria-invalid={!!errors.base_price}
+                aria-describedby={describedBy("base_price")}
+                className={inputClass("base_price")}
+              />
+            </Field>
 
-        <Field
-          label="Promo price (₱)"
-          icon={<Tag className="w-3.5 h-3.5" />}
-          htmlFor={`${plan.id}-discount_price`}
-          error={errors.discount_price}
-        >
-          <input
-            id={`${plan.id}-discount_price`}
-            type="number"
-            name="discount_price"
-            min={0}
-            step="any"
-            inputMode="decimal"
-            value={values.discount_price}
-            onChange={update("discount_price")}
-            placeholder="No active promo"
-            aria-invalid={!!errors.discount_price}
-            aria-describedby={describedBy("discount_price")}
-            className={inputClass("discount_price")}
-          />
-        </Field>
+            <Field
+              label="Promo price (₱)"
+              icon={<Tag className="w-3.5 h-3.5" />}
+              htmlFor={`${plan.id}-discount_price`}
+              error={errors.discount_price}
+            >
+              <input
+                id={`${plan.id}-discount_price`}
+                type="number"
+                name="discount_price"
+                min={0}
+                step="any"
+                inputMode="decimal"
+                value={values.discount_price}
+                onChange={update("discount_price")}
+                placeholder="No active promo"
+                aria-invalid={!!errors.discount_price}
+                aria-describedby={describedBy("discount_price")}
+                className={inputClass("discount_price")}
+              />
+            </Field>
 
-        <Field
-          label="Promo end date"
-          icon={<CalendarClock className="w-3.5 h-3.5" />}
-          htmlFor={`${plan.id}-discount_end_date`}
-          hint="Your local time"
-          error={errors.discount_end_date}
-        >
-          <input
-            id={`${plan.id}-discount_end_date`}
-            type="datetime-local"
-            name="discount_end_date"
-            value={values.discount_end_date}
-            onChange={update("discount_end_date")}
-            aria-invalid={!!errors.discount_end_date}
-            aria-describedby={describedBy("discount_end_date")}
-            className={inputClass("discount_end_date")}
-          />
-        </Field>
+            <Field
+              label="Promo end date"
+              icon={<CalendarClock className="w-3.5 h-3.5" />}
+              htmlFor={`${plan.id}-discount_end_date`}
+              hint="Your local time"
+              error={errors.discount_end_date}
+            >
+              <input
+                id={`${plan.id}-discount_end_date`}
+                type="datetime-local"
+                name="discount_end_date"
+                value={values.discount_end_date}
+                onChange={update("discount_end_date")}
+                aria-invalid={!!errors.discount_end_date}
+                aria-describedby={describedBy("discount_end_date")}
+                className={inputClass("discount_end_date")}
+              />
+            </Field>
           </>
         )}
 
@@ -435,14 +442,13 @@ function PlanCard({
         </div>
       </div>
 
-      {/* Actions */}
       <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setValues(baseline)}
             disabled={!isDirty || isBusy}
-            className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none"
+            className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" /> Discard changes
           </button>
@@ -451,7 +457,7 @@ function PlanCard({
               type="button"
               onClick={() => setValues((prev) => ({ ...prev, discount_price: "", discount_end_date: "" }))}
               disabled={isBusy}
-              className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none"
+              className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
             >
               <X className="w-3.5 h-3.5" /> Clear promo
             </button>
@@ -461,7 +467,7 @@ function PlanCard({
         <button
           type="submit"
           disabled={!canSave}
-          className="w-full sm:w-auto px-8 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm shadow-md shadow-brand-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none disabled:pointer-events-none"
+          className="w-full sm:w-auto px-8 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm shadow-md shadow-brand-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none disabled:pointer-events-none cursor-pointer"
         >
           {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           {isSaving ? "Saving..." : "Save changes"}
@@ -478,8 +484,16 @@ function PlanCard({
 export function PricingManager({ initialPlans }: { initialPlans: Plan[] }) {
   const router = useRouter(); 
   const [isPending, startTransition] = useTransition();
+  // State 1: Para sa loading spinner ng button
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+
+  // FIX: I-sort agad ang initialPlans base sa ating PLAN_ORDER dictionary para hindi magbago-bago ang pwesto
+  const sortedPlans = [...(initialPlans || [])].sort((a, b) => {
+    const rankA = PLAN_ORDER[a.id] || 99;
+    const rankB = PLAN_ORDER[b.id] || 99;
+    return rankA - rankB;
+  });
 
   useEffect(() => {
     if (!feedback) return;
@@ -487,32 +501,35 @@ export function PricingManager({ initialPlans }: { initialPlans: Plan[] }) {
     return () => clearTimeout(timer);
   }, [feedback]);
 
-  function handleSave(planId: string, formData: FormData, onSuccess: () => void) {
-    if (isPending) return;
+  async function handleSave(planId: string, formData: FormData, onSuccess: () => void) {
+    if (savingId) return; // Prevent multiple saves at once
 
     setSavingId(planId);
     setFeedback(null);
 
-    startTransition(async () => {
-      try {
-        await updatePricing(formData);
-        onSuccess();
-        setFeedback({ type: "success", message: "Pricing updated." });
-        
+    try {
+      await updatePricing(formData);
+      onSuccess();
+      setFeedback({ type: "success", message: "Pricing updated successfully!" });
+      
+      // FIX: Ang router.refresh() ay nasa loob ng startTransition para sumabay sa React flow, 
+      // pero ang pagtanggal ng savingId ay HINDI para agad ma-enable ulit ang mga buttons.
+      startTransition(() => {
         router.refresh(); 
-      } catch (err) {
-        const message = err instanceof Error && err.message ? err.message : "Couldn't update pricing. Try again.";
-        setFeedback({ type: "error", message });
-      } finally {
-        setSavingId(null);
-      }
-    });
+      });
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : "Couldn't update pricing. Try again.";
+      setFeedback({ type: "error", message });
+    } finally {
+      // FIX: Agad burahin ang savingId pagkatapos para hindi ma-stuck ang buttons
+      setSavingId(null);
+    }
   }
 
   return (
     <div className="space-y-6">
       {feedback && (
-        <div className="sticky top-4 z-30">
+        <div className="sticky top-4 z-30 animate-in slide-in-from-top-2">
           <div className="rounded-xl bg-white dark:bg-dark-900 shadow-lg">
             <div
               role={feedback.type === "error" ? "alert" : "status"}
@@ -532,7 +549,7 @@ export function PricingManager({ initialPlans }: { initialPlans: Plan[] }) {
                 type="button"
                 onClick={() => setFeedback(null)}
                 aria-label="Dismiss message"
-                className="p-1 rounded-lg opacity-70 hover:opacity-100 transition"
+                className="p-1 rounded-lg opacity-70 hover:opacity-100 transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -541,14 +558,15 @@ export function PricingManager({ initialPlans }: { initialPlans: Plan[] }) {
         </div>
       )}
 
-      {initialPlans?.length ? (
+      {sortedPlans.length ? (
         <div className="grid gap-6">
-          {initialPlans.map((plan) => (
+          {sortedPlans.map((plan) => (
             <PlanCard
               key={plan.id}
               plan={plan}
               isSaving={savingId === plan.id}
-              isBusy={isPending}
+              // FIX: Ang buong page ay i-lock kung may isang nagse-save, o kung nag-re-refresh ang router
+              isBusy={savingId !== null || isPending}
               onSave={handleSave}
             />
           ))}

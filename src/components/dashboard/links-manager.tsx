@@ -15,6 +15,8 @@ import {
   Link as LinkIcon,
   Type,
   Share2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   FaFacebook,
@@ -52,6 +54,7 @@ interface LinksManagerProps {
 }
 
 const TITLE_MAX = 60;
+const PAGE_SIZES = [10, 25, 50] as const;
 
 const PLATFORMS = [
   { id: "website", name: "Website", icon: Globe, placeholder: "e.g. My Portfolio" },
@@ -69,6 +72,9 @@ const INPUT_CLASS =
 const CARD_CLASS =
   "glass-card p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-900";
 
+const FOCUS_RING =
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-900";
+
 function isSafeHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -76,6 +82,19 @@ function isSafeHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+// Page numbers with gaps, e.g. 1 … 4 5 6 … 12
+function getPageItems(current: number, total: number): (number | "…")[] {
+  if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1);
+  const items: (number | "…")[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) items.push("…");
+  for (let i = start; i <= end; i++) items.push(i);
+  if (end < total - 1) items.push("…");
+  items.push(total);
+  return items;
 }
 
 function Field({
@@ -112,12 +131,16 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [platform, setPlatform] = useState("website");
   const [titleLength, setTitleLength] = useState(0);
-  
+
+  // PAGINATION STATE
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
   // EDIT STATE
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editUrl, setEditUrl] = useState("");
-  
+
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -128,6 +151,14 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
   const hasLimit = typeof maxLinks === "number";
   const isAtLimit = hasLimit && links.length >= maxLinks;
   const currentPlatform = PLATFORMS.find((p) => p.id === platform) ?? PLATFORMS[0];
+
+  // Pagination (safePage keeps us in range after deletes or a refresh)
+  const totalPages = Math.max(1, Math.ceil(links.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const currentLinks = links.slice(startIndex, startIndex + pageSize);
+  const rangeStart = links.length === 0 ? 0 : startIndex + 1;
+  const rangeEnd = Math.min(startIndex + pageSize, links.length);
 
   useEffect(() => {
     setIsMounted(true);
@@ -145,6 +176,20 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
     );
     return () => clearTimeout(timer);
   }, [feedback]);
+
+  function goToPage(page: number) {
+    setCurrentPage(Math.min(Math.max(1, page), totalPages));
+    // A pending delete confirmation or open editor belongs to a row that may be hidden now
+    setConfirmDeleteId(null);
+    setEditingId(null);
+  }
+
+  function handlePageSizeChange(size: number) {
+    setPageSize(size);
+    setCurrentPage(1);
+    setConfirmDeleteId(null);
+    setEditingId(null);
+  }
 
   function handleAddLink(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -168,10 +213,13 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
       });
       return;
     }
-    
+
     formData.set("url", url);
     formData.set("title", String(formData.get("title") || "").trim());
     formData.set("position", links.length.toString());
+
+    // New links are added at the end, so jump to the page where it will appear
+    const pageOfNewLink = Math.max(1, Math.ceil((links.length + 1) / pageSize));
 
     startAdd(async () => {
       try {
@@ -184,6 +232,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
         formRef.current?.reset();
         setPlatform("website");
         setTitleLength(0);
+        setCurrentPage(pageOfNewLink);
         setFeedback({ type: "success", message: "Link added successfully!" });
         router.refresh();
       } catch {
@@ -210,7 +259,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
       setFeedback({ type: "error", message: "Title and URL are required." });
       return;
     }
-    
+
     if (!isSafeHttpUrl(editUrl.trim())) {
       setFeedback({ type: "error", message: "URL must start with http:// or https://" });
       return;
@@ -223,14 +272,14 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
           .from("social_links")
           .update({ title: editTitle.trim(), url: editUrl.trim() })
           .eq("id", id);
-          
+
         if (error) throw error;
-        
+
         // Optimistic update
-        setLinks((prev) => 
+        setLinks((prev) =>
           prev.map((l) => l.id === id ? { ...l, title: editTitle.trim(), url: editUrl.trim() } : l)
         );
-        
+
         setEditingId(null);
         setFeedback({ type: "success", message: "Link updated successfully!" });
         router.refresh();
@@ -275,10 +324,15 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
     setConfirmDeleteId(null);
     setEditingId(null); // Cancel editing if they drag
 
+    // The drag indexes are relative to the current page, so convert them to
+    // positions in the full list before reordering
+    const fromIndex = startIndex + result.source.index;
+    const toIndex = startIndex + result.destination.index;
+
     const previous = links;
     const items = Array.from(links);
-    const [reorderedItem] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, reorderedItem);
+    const [reorderedItem] = items.splice(fromIndex, 1);
+    items.splice(toIndex, 0, reorderedItem);
 
     const updatedItems = items.map((item, index) => ({
       ...item,
@@ -446,7 +500,9 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
                 />
               )}
             </h3>
-            <span className="text-[11px] text-slate-400">Drag to reorder</span>
+            <span className="text-[11px] text-slate-400">
+              {totalPages > 1 ? "Drag to reorder within this page" : "Drag to reorder"}
+            </span>
           </div>
         )}
 
@@ -473,7 +529,7 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
                     </div>
                   )}
 
-                  {links.map((link, index) => {
+                  {currentLinks.map((link, index) => {
                     const Icon = PLATFORMS.find((p) => p.id === link.platform)?.icon || Globe;
                     const isConfirmingDelete = confirmDeleteId === link.id;
                     const isEditing = editingId === link.id;
@@ -511,19 +567,19 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
                               <div className="flex-1 min-w-0">
                                 {isEditing ? (
                                   <div className="space-y-2 pr-2">
-                                    <input 
-                                      type="text" 
+                                    <input
+                                      type="text"
                                       value={editTitle}
                                       onChange={(e) => setEditTitle(e.target.value)}
                                       placeholder="Title"
-                                      className="w-full px-3 py-1.5 text-sm rounded-lg bg-slate-50 dark:bg-dark-950 border border-brand-500/50 outline-none focus:ring-2 focus:ring-brand-500/20" 
+                                      className="w-full px-3 py-1.5 text-sm rounded-lg bg-slate-50 dark:bg-dark-950 border border-brand-500/50 outline-none focus:ring-2 focus:ring-brand-500/20"
                                     />
-                                    <input 
-                                      type="url" 
+                                    <input
+                                      type="url"
                                       value={editUrl}
                                       onChange={(e) => setEditUrl(e.target.value)}
                                       placeholder="https://"
-                                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 outline-none focus:border-brand-500/50" 
+                                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-dark-950 border border-slate-200 dark:border-white/10 outline-none focus:border-brand-500/50"
                                     />
                                   </div>
                                 ) : (
@@ -623,6 +679,86 @@ export function LinksManager({ initialLinks, maxLinks }: LinksManagerProps) {
               )}
             </Droppable>
           </DragDropContext>
+        )}
+
+        {/* PAGINATION (only shown once there's more than one page's worth of links) */}
+        {isMounted && links.length > PAGE_SIZES[0] && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-slate-200 dark:border-white/10">
+            <div className="flex items-center gap-3 flex-wrap">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                <span className="font-bold text-slate-900 dark:text-white tabular-nums">
+                  {rangeStart}–{rangeEnd}
+                </span>{" "}
+                of {links.length}
+              </p>
+              <label htmlFor="links-page-size" className="sr-only">
+                Links per page
+              </label>
+              <select
+                id="links-page-size"
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                className={`px-2.5 py-1 rounded-lg bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 text-xs text-slate-600 dark:text-slate-300 cursor-pointer ${FOCUS_RING}`}
+              >
+                {PAGE_SIZES.map((n) => (
+                  <option key={n} value={n}>
+                    {n} per page
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {totalPages > 1 && (
+              <nav className="flex items-center gap-1.5" aria-label="Pagination">
+                <button
+                  type="button"
+                  onClick={() => goToPage(safePage - 1)}
+                  disabled={safePage === 1}
+                  aria-label="Previous page"
+                  className={`p-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer ${FOCUS_RING}`}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                {getPageItems(safePage, totalPages).map((item, i) =>
+                  item === "…" ? (
+                    <span
+                      key={`gap-${i}`}
+                      className="px-1 text-xs text-slate-400"
+                      aria-hidden="true"
+                    >
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => goToPage(item)}
+                      aria-label={`Page ${item}`}
+                      aria-current={item === safePage ? "page" : undefined}
+                      className={`min-w-9 h-9 px-2 rounded-xl text-xs font-semibold tabular-nums transition cursor-pointer ${FOCUS_RING} ${
+                        item === safePage
+                          ? "bg-brand-500 text-white"
+                          : "border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => goToPage(safePage + 1)}
+                  disabled={safePage === totalPages}
+                  aria-label="Next page"
+                  className={`p-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer ${FOCUS_RING}`}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </nav>
+            )}
+          </div>
         )}
       </div>
     </div>

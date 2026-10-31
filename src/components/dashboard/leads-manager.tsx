@@ -19,6 +19,8 @@ import {
   Clock,
   Loader2,
   ClipboardList,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   toggleLeadCaptureForm,
@@ -45,6 +47,7 @@ type SortOrder = "newest" | "oldest";
 type BusyAction = "toggle" | "delete" | null;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const PAGE_SIZES = [10, 25, 50] as const;
 
 const STAT_TONES = {
   brand: "bg-brand-100 dark:bg-brand-500/20 text-brand-600 dark:text-brand-300",
@@ -99,6 +102,19 @@ function csvCell(value: string | null | undefined): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+// Page numbers with gaps, e.g. 1 … 4 5 6 … 12
+function getPageItems(current: number, total: number): (number | "…")[] {
+  if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1);
+  const items: (number | "…")[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) items.push("…");
+  for (let i = start; i <= end; i++) items.push(i);
+  if (end < total - 1) items.push("…");
+  items.push(total);
+  return items;
+}
+
 function StatCard({
   icon: Icon,
   label,
@@ -145,6 +161,8 @@ export function LeadsManager({
   const [formEnabled, setFormEnabled] = useState(showLeadForm);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortOrder>("newest");
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -212,7 +230,27 @@ export function LeadsManager({
     });
   }, [leads, query, sort]);
 
+  // Pagination (safePage keeps us in range after deletes or a refresh)
+  const totalPages = Math.max(1, Math.ceil(visibleLeads.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const currentLeads = visibleLeads.slice(startIndex, startIndex + pageSize);
+  const rangeStart = visibleLeads.length === 0 ? 0 : startIndex + 1;
+  const rangeEnd = Math.min(startIndex + pageSize, visibleLeads.length);
+
   /* ---------------- Handlers ---------------- */
+
+  // Any change to the view (search, sort, page size) goes back to page 1
+  function changeView(update: () => void) {
+    update();
+    setCurrentPage(1);
+    setConfirmDeleteId(null);
+  }
+
+  function goToPage(page: number) {
+    setCurrentPage(Math.min(Math.max(1, page), totalPages));
+    setConfirmDeleteId(null);
+  }
 
   function handleToggle() {
     if (isBusy) return; // ignore double clicks while a request is running
@@ -295,6 +333,7 @@ export function LeadsManager({
     });
   }
 
+  // Exports ALL leads that match the current search, not just the current page
   function handleExport() {
     if (visibleLeads.length === 0) return;
 
@@ -442,7 +481,7 @@ export function LeadsManager({
                 id="leads-search"
                 type="search"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => changeView(() => setQuery(e.target.value))}
                 placeholder="Search name, phone, email, or message..."
                 autoComplete="off"
                 spellCheck={false}
@@ -451,7 +490,7 @@ export function LeadsManager({
               {query && (
                 <button
                   type="button"
-                  onClick={() => setQuery("")}
+                  onClick={() => changeView(() => setQuery(""))}
                   className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer ${FOCUS_RING}`}
                   aria-label="Clear search"
                 >
@@ -467,7 +506,9 @@ export function LeadsManager({
               <select
                 id="leads-sort"
                 value={sort}
-                onChange={(e) => setSort(e.target.value as SortOrder)}
+                onChange={(e) =>
+                  changeView(() => setSort(e.target.value as SortOrder))
+                }
                 className={`${INPUT_CLASS} sm:w-auto cursor-pointer`}
               >
                 <option value="newest">Newest first</option>
@@ -504,7 +545,7 @@ export function LeadsManager({
               </p>
               <button
                 type="button"
-                onClick={() => setQuery("")}
+                onClick={() => changeView(() => setQuery(""))}
                 className={`mt-2 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer rounded ${FOCUS_RING}`}
               >
                 Clear search
@@ -512,7 +553,7 @@ export function LeadsManager({
             </div>
           ) : (
             <div className="grid gap-4">
-              {visibleLeads.map((lead) => {
+              {currentLeads.map((lead) => {
                 const isConfirmingDelete = confirmDeleteId === lead.id;
                 const initial =
                   lead.visitor_name?.trim().charAt(0).toUpperCase() || "?";
@@ -624,6 +665,91 @@ export function LeadsManager({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* PAGINATION */}
+          {visibleLeads.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-slate-200 dark:border-white/10">
+              <div className="flex items-center gap-3 flex-wrap">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <span className="font-bold text-slate-900 dark:text-white tabular-nums">
+                    {rangeStart}–{rangeEnd}
+                  </span>{" "}
+                  of {visibleLeads.length}
+                </p>
+                <label htmlFor="leads-page-size" className="sr-only">
+                  Leads per page
+                </label>
+                <select
+                  id="leads-page-size"
+                  value={pageSize}
+                  onChange={(e) =>
+                    changeView(() => setPageSize(Number(e.target.value)))
+                  }
+                  className={`px-2.5 py-1 rounded-lg bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 text-xs text-slate-600 dark:text-slate-300 cursor-pointer ${FOCUS_RING}`}
+                >
+                  {PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n} per page
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {totalPages > 1 && (
+                <nav
+                  className="flex items-center gap-1.5"
+                  aria-label="Pagination"
+                >
+                  <button
+                    type="button"
+                    onClick={() => goToPage(safePage - 1)}
+                    disabled={safePage === 1}
+                    aria-label="Previous page"
+                    className={`p-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer ${FOCUS_RING}`}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  {getPageItems(safePage, totalPages).map((item, i) =>
+                    item === "…" ? (
+                      <span
+                        key={`gap-${i}`}
+                        className="px-1 text-xs text-slate-400"
+                        aria-hidden="true"
+                      >
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => goToPage(item)}
+                        aria-label={`Page ${item}`}
+                        aria-current={item === safePage ? "page" : undefined}
+                        className={`min-w-9 h-9 px-2 rounded-xl text-xs font-semibold tabular-nums transition cursor-pointer ${FOCUS_RING} ${
+                          item === safePage
+                            ? "bg-brand-500 text-white"
+                            : "border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5"
+                        }`}
+                      >
+                        {item}
+                      </button>
+                    )
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => goToPage(safePage + 1)}
+                    disabled={safePage === totalPages}
+                    aria-label="Next page"
+                    className={`p-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer ${FOCUS_RING}`}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </nav>
+              )}
             </div>
           )}
         </>

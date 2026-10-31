@@ -68,12 +68,12 @@ async function BillingData({
         {/* FREE TIER */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 flex flex-col relative shadow-sm">
           {currentTier === "demo" && (
-            <div className="absolute top-4 right-4 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-400/20">
+            <div className="absolute top-8 right-4 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-400/20">
               Current Plan
             </div>
           )}
           <Shield className="w-10 h-10 text-slate-400 dark:text-slate-400 mb-4" />
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">{demoPlan?.name || "Free Tier"}</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">{demoPlan?.name || "Demo"}</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{demoPlan?.description}</p>
           <div className="my-6">
             <span className="text-4xl font-extrabold text-slate-900 dark:text-white">₱0</span>
@@ -93,8 +93,13 @@ async function BillingData({
 
         {/* STANDARD TIER */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 flex flex-col relative shadow-sm">
+          {/* BEST VALUE BADGE */}
+          <div className="absolute -top-3 right-6 text-[11px] font-bold text-white bg-emerald-600 px-3.5 py-1 rounded-full shadow-sm tracking-wide">
+            BEST VALUE
+          </div>
+
           {currentTier === "standard" && (
-            <div className="absolute top-4 right-4 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-400/20">
+            <div className="absolute top-8 right-4 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-400/20">
               Current Plan
             </div>
           )}
@@ -132,11 +137,11 @@ async function BillingData({
 
         {/* PREMIUM TIER */}
         <div className="bg-indigo-50/50 dark:bg-[#0f111a] border border-indigo-200 dark:border-indigo-500/30 rounded-3xl p-6 flex flex-col relative shadow-xl shadow-indigo-100 dark:shadow-indigo-500/10">
-          <div className="absolute -top-3 right-6 text-xs font-bold text-white bg-indigo-500 px-4 py-1 rounded-full">
+          <div className="absolute -top-3 right-6 text-[11px] font-bold text-white bg-indigo-500 px-3.5 py-1 rounded-full tracking-wide">
             MOST POPULAR
           </div>
           {currentTier === "premium" && (
-            <div className="absolute top-4 right-4 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-400/20">
+            <div className="absolute top-8 right-4 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-400/20">
               Current Plan
             </div>
           )}
@@ -185,9 +190,6 @@ export default function BillingPage({
     <div className="max-w-5xl mx-auto p-6 space-y-8">
       <div>
         <h1 className="text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
-          <span className="bg-indigo-100 dark:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 p-2 rounded-lg">
-            💳
-          </span>
           Plans & Billing
         </h1>
         <p className="text-slate-600 dark:text-slate-400 mt-2">

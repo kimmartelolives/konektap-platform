@@ -6,7 +6,7 @@ export async function createCheckoutSession(targetTier: "standard" | "premium") 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) return { error: "Kailangan mong mag-login muna." };
+  if (!user) return { error: "You need to login first." };
 
   // 1. Kunin ang dynamic pricing mula sa Supabase
   const { data: plan, error: dbError } = await supabase
@@ -15,7 +15,7 @@ export async function createCheckoutSession(targetTier: "standard" | "premium") 
     .eq("id", targetTier)
     .single();
 
-  if (dbError || !plan) return { error: "Hindi mahanap ang pricing plan." };
+  if (dbError || !plan) return { error: "Pricing Plan not found." };
 
   // 2. Kalkulahin kung gagamitin ang base price o discount price
   const now = new Date();
@@ -44,7 +44,7 @@ export async function createCheckoutSession(targetTier: "standard" | "premium") 
       },
       body: JSON.stringify({
         external_id: externalId,
-        amount: finalAmount, // Dito papasok ang dynamic o discounted price
+        amount: finalAmount,
         currency: "PHP",
         description: `Upgrade account to ${plan.name}`,
         payer_email: user.email,

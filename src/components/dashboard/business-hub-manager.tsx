@@ -28,6 +28,8 @@ import {
   Star,
   Search,
   Building2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -95,6 +97,11 @@ type TabType = "services" | "map" | "appointments" | "catalog" | "reviews";
 type BusyAction = "add" | "update" | "delete" | "reorder" | "settings" | null;
 
 const MAX_GOOGLE_REVIEWS = 6;
+const SERVICE_PAGE_SIZES = [10, 25, 50] as const;
+const MAX_PRICE = 99999999;
+const SERVICE_TITLE_MAX = 80;
+const BOOKING_TITLE_MAX = 60;
+const CATALOG_TITLE_MAX = 60;
 
 const BOOKING_PLATFORMS = [
   { id: "calendar", label: "Calendly / Cal.com", icon: Calendar },
@@ -172,16 +179,57 @@ function useDebouncedValue<T>(value: T, delay = 500): T {
   return debounced;
 }
 
+type PriceMode = "exact" | "range";
+
+function formatPesos(amount: number): string {
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+// Reads "1500-3000", "1500 - 3000" or "₱1,500 – ₱3,000" back into its two numbers
+function parsePriceRange(priceStr: string): { min: string; max: string } | null {
+  const cleaned = priceStr.replace(/[₱,\s]/g, "");
+  const match = cleaned.match(/^(\d+(?:\.\d+)?)[-–—](\d+(?:\.\d+)?)$/);
+  return match ? { min: match[1], max: match[2] } : null;
+}
+
+// Validates a min/max pair and builds the text that gets saved, e.g. "₱1,500 – ₱3,000"
+function buildPriceRange(
+  minStr: string,
+  maxStr: string
+): { price?: string; error?: string } {
+  if (!minStr.trim() || !maxStr.trim()) {
+    return { error: "Enter both a minimum and a maximum price." };
+  }
+  const min = Number(minStr);
+  const max = Number(maxStr);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < 0) {
+    return { error: "Price range must be valid numbers (0 or higher)." };
+  }
+  if (min > MAX_PRICE || max > MAX_PRICE) {
+    return {
+      error: `Prices can't be higher than ${formatPesos(MAX_PRICE)}.`,
+    };
+  }
+  if (min >= max) {
+    return { error: "The maximum price must be higher than the minimum." };
+  }
+  return { price: `${formatPesos(min)} – ${formatPesos(max)}` };
+}
+
 function formatPriceDisplay(priceStr: string): string {
   if (!priceStr) return "";
   const trimmed = priceStr.trim();
   if (/^\d+(\.\d+)?$/.test(trimmed)) {
-    return new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: "PHP",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    }).format(Number(trimmed));
+    return formatPesos(Number(trimmed));
+  }
+  const range = parsePriceRange(trimmed);
+  if (range) {
+    return `${formatPesos(Number(range.min))} – ${formatPesos(Number(range.max))}`;
   }
   return trimmed;
 }
@@ -277,6 +325,143 @@ function resolveGoogleReviewUrl(rawInput: string, businessName: string): string 
   )}`;
 }
 
+// Page numbers with gaps, e.g. 1 … 4 5 6 … 12
+function getPageItems(current: number, total: number): (number | "…")[] {
+  if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1);
+  const items: (number | "…")[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) items.push("…");
+  for (let i = start; i <= end; i++) items.push(i);
+  if (end < total - 1) items.push("…");
+  items.push(total);
+  return items;
+}
+
+function isPlainNumber(value: string): boolean {
+  return /^\d+(\.\d+)?$/.test(value);
+}
+
+// Returns an error message, or null when the exact price is fine
+function validateExactPrice(value: string): string | null {
+  if (!isPlainNumber(value)) return "Price must be a number, e.g. 15000.";
+  if (Number(value) > MAX_PRICE) {
+    return `Price can't be higher than ${formatPesos(MAX_PRICE)}.`;
+  }
+  return null;
+}
+
+// type="number" still accepts e, +, and -, so keep prices to digits and a decimal point
+function blockNonNumericKeys(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (["e", "E", "+", "-"].includes(e.key)) e.preventDefault();
+}
+
+function PriceModeToggle({
+  value,
+  onChange,
+}: {
+  value: PriceMode;
+  onChange: (mode: PriceMode) => void;
+}) {
+  const options: { id: PriceMode; label: string }[] = [
+    { id: "exact", label: "Exact" },
+    { id: "range", label: "Range" },
+  ];
+  return (
+    <div
+      role="group"
+      aria-label="Price type"
+      className="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-white/5"
+    >
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          aria-pressed={value === option.id}
+          onClick={() => onChange(option.id)}
+          className={`inline-flex items-center h-6 px-2.5 rounded-md text-[11px] font-semibold transition cursor-pointer ${FOCUS_RING} ${
+            value === option.id
+              ? "bg-white dark:bg-dark-900 text-brand-600 dark:text-brand-400 shadow-sm"
+              : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PriceRangeInputs({
+  idPrefix,
+  min,
+  max,
+  onMinChange,
+  onMaxChange,
+  inputClass,
+}: {
+  idPrefix: string;
+  min: string;
+  max: string;
+  onMinChange: (value: string) => void;
+  onMaxChange: (value: string) => void;
+  inputClass: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="relative flex-1 min-w-0">
+        <span
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 pointer-events-none"
+          aria-hidden="true"
+        >
+          ₱
+        </span>
+        <input
+          id={`${idPrefix}-min`}
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={MAX_PRICE}
+          step="any"
+          value={min}
+          onChange={(e) => onMinChange(e.target.value)}
+          onKeyDown={blockNonNumericKeys}
+          placeholder="Min"
+          aria-label="Minimum price"
+          autoComplete="off"
+          className={`${inputClass} pl-7`}
+        />
+      </div>
+      <span className="text-xs text-slate-400 shrink-0" aria-hidden="true">
+        to
+      </span>
+      <div className="relative flex-1 min-w-0">
+        <span
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 pointer-events-none"
+          aria-hidden="true"
+        >
+          ₱
+        </span>
+        <input
+          id={`${idPrefix}-max`}
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={MAX_PRICE}
+          step="any"
+          value={max}
+          onChange={(e) => onMaxChange(e.target.value)}
+          onKeyDown={blockNonNumericKeys}
+          placeholder="Max"
+          aria-label="Maximum price"
+          autoComplete="off"
+          className={`${inputClass} pl-7`}
+        />
+      </div>
+    </div>
+  );
+}
+
 function CharCount({ value, max }: { value: number; max: number }) {
   return (
     <p
@@ -312,6 +497,21 @@ export function BusinessHubManager({
   const [editDescription, setEditDescription] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [newDescLength, setNewDescLength] = useState(0);
+  const [newTitleLength, setNewTitleLength] = useState(0);
+
+  // Services pagination
+  const [servicePageSize, setServicePageSize] = useState<number>(10);
+  const [servicePage, setServicePage] = useState(1);
+
+  // Price type for the "Add service" form and the inline editor
+  const [priceMode, setPriceMode] = useState<PriceMode>("exact");
+  const [rangeMin, setRangeMin] = useState("");
+  const [rangeMax, setRangeMax] = useState("");
+  const [editPriceMode, setEditPriceMode] = useState<PriceMode>("exact");
+  const [editRangeMin, setEditRangeMin] = useState("");
+  const [editRangeMax, setEditRangeMax] = useState("");
+  const rangePreview =
+    priceMode === "range" ? buildPriceRange(rangeMin, rangeMax).price : undefined;
 
   const [locationAddress, setLocationAddress] = useState(
     profile?.location_address || ""
@@ -360,6 +560,23 @@ export function BusinessHubManager({
   const [selectedCandidate, setSelectedCandidate] =
     useState<PlaceSearchCandidate | null>(null);
   const [customReviewUrlOrPlaceId, setCustomReviewUrlOrPlaceId] = useState("");
+
+  // Services pagination (safe page keeps us in range after deletes or a refresh)
+  const serviceTotalPages = Math.max(
+    1,
+    Math.ceil(services.length / servicePageSize)
+  );
+  const safeServicePage = Math.min(servicePage, serviceTotalPages);
+  const serviceStartIndex = (safeServicePage - 1) * servicePageSize;
+  const currentServices = services.slice(
+    serviceStartIndex,
+    serviceStartIndex + servicePageSize
+  );
+  const serviceRangeStart = services.length === 0 ? 0 : serviceStartIndex + 1;
+  const serviceRangeEnd = Math.min(
+    serviceStartIndex + servicePageSize,
+    services.length
+  );
 
   const debouncedAddress = useDebouncedValue(locationAddress, 600);
   const debouncedEmbed = useDebouncedValue(mapEmbedInput, 600);
@@ -568,10 +785,30 @@ export function BusinessHubManager({
     });
   }
 
+  function goToServicePage(page: number) {
+    setServicePage(Math.min(Math.max(1, page), serviceTotalPages));
+    // An open editor or delete confirmation belongs to a row that may be hidden now
+    setEditingId(null);
+    setConfirmDeleteId(null);
+  }
+
+  function handleServicePageSizeChange(size: number) {
+    setServicePageSize(size);
+    setServicePage(1);
+    setEditingId(null);
+    setConfirmDeleteId(null);
+  }
+
   function startEditing(service: ServiceItem) {
     setEditingId(service.id);
     setEditTitle(service.title);
-    setEditPrice(service.price);
+    // The exact price field is numbers only, so older text prices start empty
+    setEditPrice(isPlainNumber(service.price.trim()) ? service.price.trim() : "");
+    // Saved ranges (e.g. "₱1,500 – ₱3,000") open in range mode
+    const range = parsePriceRange(service.price);
+    setEditPriceMode(range ? "range" : "exact");
+    setEditRangeMin(range?.min ?? "");
+    setEditRangeMax(range?.max ?? "");
     setEditDescription(service.description || "");
     setConfirmDeleteId(null);
     setFeedback(null);
@@ -605,7 +842,49 @@ export function BusinessHubManager({
     setFeedback(null);
     const formElement = e.currentTarget;
     const formData = new FormData(formElement);
+
+    const title = String(formData.get("title") || "").trim();
+    if (!title) {
+      setFeedback({ type: "error", message: "Service name is required." });
+      return;
+    }
+    if (title.length > SERVICE_TITLE_MAX) {
+      setFeedback({
+        type: "error",
+        message: `Service name can't be longer than ${SERVICE_TITLE_MAX} characters.`,
+      });
+      return;
+    }
+    formData.set("title", title);
+
+    if (priceMode === "exact") {
+      const exactPrice = String(formData.get("price") || "").trim();
+      const priceError = validateExactPrice(exactPrice);
+      if (priceError) {
+        setFeedback({ type: "error", message: priceError });
+        return;
+      }
+      formData.set("price", exactPrice);
+    }
+
+    if (priceMode === "range") {
+      const range = buildPriceRange(rangeMin, rangeMax);
+      if (!range.price) {
+        setFeedback({
+          type: "error",
+          message: range.error ?? "Enter a valid price range.",
+        });
+        return;
+      }
+      formData.set("price", range.price);
+    }
+
     formData.append("position", services.length.toString());
+    // New services are added at the end, so jump to the page where it will appear
+    const pageOfNewService = Math.max(
+      1,
+      Math.ceil((services.length + 1) / servicePageSize)
+    );
     setBusyAction("add");
 
     startTransition(async () => {
@@ -617,6 +896,11 @@ export function BusinessHubManager({
         }
         formElement.reset();
         setNewDescLength(0);
+        setNewTitleLength(0);
+        setPriceMode("exact");
+        setRangeMin("");
+        setRangeMax("");
+        setServicePage(pageOfNewService);
         setFeedback({ type: "success", message: "Service added successfully!" });
         router.refresh();
       } catch {
@@ -632,7 +916,10 @@ export function BusinessHubManager({
 
   function handleUpdateService(id: string) {
     if (isBusy) return;
-    if (!editTitle.trim() || !editPrice.trim()) {
+    if (
+      !editTitle.trim() ||
+      (editPriceMode === "exact" && !editPrice.trim())
+    ) {
       setFeedback({
         type: "error",
         message: "Service name and price are required.",
@@ -640,11 +927,39 @@ export function BusinessHubManager({
       return;
     }
 
+    if (editTitle.trim().length > SERVICE_TITLE_MAX) {
+      setFeedback({
+        type: "error",
+        message: `Service name can't be longer than ${SERVICE_TITLE_MAX} characters.`,
+      });
+      return;
+    }
+
+    let finalPrice = editPrice.trim();
+    if (editPriceMode === "exact") {
+      const priceError = validateExactPrice(finalPrice);
+      if (priceError) {
+        setFeedback({ type: "error", message: priceError });
+        return;
+      }
+    }
+    if (editPriceMode === "range") {
+      const range = buildPriceRange(editRangeMin, editRangeMax);
+      if (!range.price) {
+        setFeedback({
+          type: "error",
+          message: range.error ?? "Enter a valid price range.",
+        });
+        return;
+      }
+      finalPrice = range.price;
+    }
+
     setFeedback(null);
     const formData = new FormData();
     formData.append("id", id);
     formData.append("title", editTitle.trim());
-    formData.append("price", editPrice.trim());
+    formData.append("price", finalPrice);
     formData.append("description", editDescription.trim());
 
     const previous = services;
@@ -654,7 +969,7 @@ export function BusinessHubManager({
           ? {
               ...item,
               title: editTitle.trim(),
-              price: editPrice.trim(),
+              price: finalPrice,
               description: editDescription.trim() || null,
             }
           : item
@@ -724,10 +1039,15 @@ export function BusinessHubManager({
     if (!result.destination) return;
     if (result.destination.index === result.source.index) return;
 
+    // The drag indexes are relative to the current page, so convert them to
+    // positions in the full list before reordering
+    const fromIndex = serviceStartIndex + result.source.index;
+    const toIndex = serviceStartIndex + result.destination.index;
+
     const previous = services;
     const items = Array.from(services);
-    const [reorderedItem] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, reorderedItem);
+    const [reorderedItem] = items.splice(fromIndex, 1);
+    items.splice(toIndex, 0, reorderedItem);
 
     const updatedItems = items.map((item, index) => ({
       ...item,
@@ -795,6 +1115,16 @@ export function BusinessHubManager({
         });
         return;
       }
+
+      const headline = String(formData.get("booking_title") || "").trim();
+      if (headline.length > BOOKING_TITLE_MAX) {
+        setFeedback({
+          type: "error",
+          message: `Card headline can't be longer than ${BOOKING_TITLE_MAX} characters.`,
+        });
+        return;
+      }
+      formData.set("booking_title", headline);
     }
 
     if (section === "catalog") {
@@ -806,6 +1136,16 @@ export function BusinessHubManager({
         });
         return;
       }
+
+      const catalogHeading = String(formData.get("catalog_title") || "").trim();
+      if (catalogHeading.length > CATALOG_TITLE_MAX) {
+        setFeedback({
+          type: "error",
+          message: `Catalog title can't be longer than ${CATALOG_TITLE_MAX} characters.`,
+        });
+        return;
+      }
+      formData.set("catalog_title", catalogHeading);
     }
 
     setBusyAction("settings");
@@ -987,7 +1327,7 @@ export function BusinessHubManager({
               <div className="space-y-1.5">
                 <label
                   htmlFor="bh-service-title"
-                  className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+                  className="flex items-center min-h-[28px] text-xs font-semibold text-slate-700 dark:text-slate-300"
                 >
                   Service Name
                 </label>
@@ -996,27 +1336,67 @@ export function BusinessHubManager({
                   autoComplete="off"
                   name="title"
                   required
-                  maxLength={80}
+                  maxLength={SERVICE_TITLE_MAX}
+                  onChange={(e) => setNewTitleLength(e.target.value.length)}
                   placeholder="e.g. Full Web Application Setup"
                   className={INPUT_CLASS}
                 />
+                <CharCount value={newTitleLength} max={SERVICE_TITLE_MAX} />
               </div>
               <div className="space-y-1.5">
-                <label
-                  htmlFor="bh-service-price"
-                  className="text-xs font-semibold text-slate-700 dark:text-slate-300"
-                >
-                  Price / Rate
-                </label>
-                <input
-                  id="bh-service-price"
-                  autoComplete="off"
-                  name="price"
-                  required
-                  maxLength={40}
-                  placeholder="e.g. 15000 or Starts at ₱1,500"
-                  className={INPUT_CLASS}
-                />
+                <div className="flex items-center justify-between gap-2 min-h-[28px]">
+                  <label
+                    htmlFor={
+                      priceMode === "exact"
+                        ? "bh-service-price"
+                        : "bh-service-price-min"
+                    }
+                    className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+                  >
+                    Price / Rate
+                  </label>
+                  <PriceModeToggle value={priceMode} onChange={setPriceMode} />
+                </div>
+                {priceMode === "exact" ? (
+                  <div className="relative">
+                    <span
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 pointer-events-none"
+                      aria-hidden="true"
+                    >
+                      ₱
+                    </span>
+                    <input
+                      id="bh-service-price"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      max={MAX_PRICE}
+                      step="any"
+                      autoComplete="off"
+                      name="price"
+                      required
+                      onKeyDown={blockNonNumericKeys}
+                      placeholder="e.g. 15000"
+                      className={`${INPUT_CLASS} pl-7`}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <PriceRangeInputs
+                      idPrefix="bh-service-price"
+                      min={rangeMin}
+                      max={rangeMax}
+                      onMinChange={setRangeMin}
+                      onMaxChange={setRangeMax}
+                      inputClass={INPUT_CLASS}
+                    />
+                    {rangePreview && (
+                      <p className="text-[11px] text-slate-400">
+                        Shows as {rangePreview}
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
@@ -1056,7 +1436,9 @@ export function BusinessHubManager({
                   Your Services ({services.length})
                 </h3>
                 <span className="text-[11px] text-slate-400">
-                  Drag to reorder
+                  {serviceTotalPages > 1
+                    ? "Drag to reorder within this page"
+                    : "Drag to reorder"}
                 </span>
               </div>
             )}
@@ -1078,7 +1460,7 @@ export function BusinessHubManager({
                         </p>
                       )}
 
-                      {services.map((service, index) => {
+                      {currentServices.map((service, index) => {
                         const isEditing = editingId === service.id;
                         const isConfirmingDelete =
                           confirmDeleteId === service.id;
@@ -1111,7 +1493,7 @@ export function BusinessHubManager({
                                       <div className="space-y-1">
                                         <label
                                           htmlFor="bh-edit-title"
-                                          className="text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+                                          className="flex items-center min-h-[28px] text-[11px] font-semibold text-slate-500 dark:text-slate-400"
                                         >
                                           Service Name
                                         </label>
@@ -1120,32 +1502,70 @@ export function BusinessHubManager({
                                           id="bh-edit-title"
                                           autoComplete="off"
                                           value={editTitle}
-                                          maxLength={80}
+                                          maxLength={SERVICE_TITLE_MAX}
                                           onChange={(e) =>
                                             setEditTitle(e.target.value)
                                           }
                                           placeholder="Service Name"
                                           className={EDIT_INPUT_CLASS}
                                         />
+                                        <CharCount
+                                          value={editTitle.length}
+                                          max={SERVICE_TITLE_MAX}
+                                        />
                                       </div>
                                       <div className="space-y-1">
-                                        <label
-                                          htmlFor="bh-edit-price"
-                                          className="text-[11px] font-semibold text-slate-500 dark:text-slate-400"
-                                        >
-                                          Price / Rate
-                                        </label>
-                                        <input
-                                          id="bh-edit-price"
-                                          autoComplete="off"
-                                          value={editPrice}
-                                          maxLength={40}
-                                          onChange={(e) =>
-                                            setEditPrice(e.target.value)
-                                          }
-                                          placeholder="Price / Rate"
-                                          className={EDIT_INPUT_CLASS}
-                                        />
+                                        <div className="flex items-center justify-between gap-2 min-h-[28px]">
+                                          <label
+                                            htmlFor={
+                                              editPriceMode === "exact"
+                                                ? "bh-edit-price"
+                                                : "bh-edit-price-min"
+                                            }
+                                            className="text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+                                          >
+                                            Price / Rate
+                                          </label>
+                                          <PriceModeToggle
+                                            value={editPriceMode}
+                                            onChange={setEditPriceMode}
+                                          />
+                                        </div>
+                                        {editPriceMode === "exact" ? (
+                                          <div className="relative">
+                                            <span
+                                              className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 pointer-events-none"
+                                              aria-hidden="true"
+                                            >
+                                              ₱
+                                            </span>
+                                            <input
+                                              id="bh-edit-price"
+                                              type="number"
+                                              inputMode="decimal"
+                                              min={0}
+                                              max={MAX_PRICE}
+                                              step="any"
+                                              autoComplete="off"
+                                              value={editPrice}
+                                              onChange={(e) =>
+                                                setEditPrice(e.target.value)
+                                              }
+                                              onKeyDown={blockNonNumericKeys}
+                                              placeholder="e.g. 15000"
+                                              className={`${EDIT_INPUT_CLASS} pl-7`}
+                                            />
+                                          </div>
+                                        ) : (
+                                          <PriceRangeInputs
+                                            idPrefix="bh-edit-price"
+                                            min={editRangeMin}
+                                            max={editRangeMax}
+                                            onMinChange={setEditRangeMin}
+                                            onMaxChange={setEditRangeMax}
+                                            inputClass={EDIT_INPUT_CLASS}
+                                          />
+                                        )}
                                       </div>
                                     </div>
 
@@ -1212,10 +1632,16 @@ export function BusinessHubManager({
 
                                       <div className="space-y-1 overflow-hidden">
                                         <div className="flex items-center gap-2.5 flex-wrap">
-                                          <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                          <h4
+                                            className="max-w-full text-sm font-bold text-slate-900 dark:text-white line-clamp-2 break-words"
+                                            title={service.title}
+                                          >
                                             {service.title}
                                           </h4>
-                                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+                                          <span
+                                            className="max-w-full truncate px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap"
+                                            title={formatPriceDisplay(service.price)}
+                                          >
                                             {formatPriceDisplay(service.price)}
                                           </span>
                                         </div>
@@ -1295,6 +1721,94 @@ export function BusinessHubManager({
                   )}
                 </Droppable>
               </DragDropContext>
+            )}
+
+            {/* PAGINATION */}
+            {isMounted && services.length > 0 && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-slate-200 dark:border-white/10">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-bold text-slate-900 dark:text-white tabular-nums">
+                      {serviceRangeStart}–{serviceRangeEnd}
+                    </span>{" "}
+                    of {services.length}
+                  </p>
+                  <label htmlFor="bh-service-page-size" className="sr-only">
+                    Services per page
+                  </label>
+                  <select
+                    id="bh-service-page-size"
+                    value={servicePageSize}
+                    onChange={(e) =>
+                      handleServicePageSizeChange(Number(e.target.value))
+                    }
+                    className={`px-2.5 py-1 rounded-lg bg-white dark:bg-dark-950 border border-slate-200 dark:border-white/10 text-xs text-slate-600 dark:text-slate-300 cursor-pointer ${FOCUS_RING}`}
+                  >
+                    {SERVICE_PAGE_SIZES.map((n) => (
+                      <option key={n} value={n}>
+                        {n} per page
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {serviceTotalPages > 1 && (
+                  <nav
+                    className="flex items-center gap-1.5"
+                    aria-label="Services pagination"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => goToServicePage(safeServicePage - 1)}
+                      disabled={safeServicePage === 1}
+                      aria-label="Previous page"
+                      className={`p-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer ${FOCUS_RING}`}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+
+                    {getPageItems(safeServicePage, serviceTotalPages).map(
+                      (item, i) =>
+                        item === "…" ? (
+                          <span
+                            key={`gap-${i}`}
+                            className="px-1 text-xs text-slate-400"
+                            aria-hidden="true"
+                          >
+                            …
+                          </span>
+                        ) : (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => goToServicePage(item)}
+                            aria-label={`Page ${item}`}
+                            aria-current={
+                              item === safeServicePage ? "page" : undefined
+                            }
+                            className={`min-w-9 h-9 px-2 rounded-xl text-xs font-semibold tabular-nums transition cursor-pointer ${FOCUS_RING} ${
+                              item === safeServicePage
+                                ? "bg-brand-500 text-white"
+                                : "border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5"
+                            }`}
+                          >
+                            {item}
+                          </button>
+                        )
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => goToServicePage(safeServicePage + 1)}
+                      disabled={safeServicePage === serviceTotalPages}
+                      aria-label="Next page"
+                      className={`p-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer ${FOCUS_RING}`}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </nav>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -1519,12 +2033,13 @@ export function BusinessHubManager({
                 id="bh-booking-title"
                 autoComplete="off"
                 name="booking_title"
-                maxLength={60}
+                maxLength={BOOKING_TITLE_MAX}
                 value={bookingTitle}
                 onChange={(e) => setBookingTitle(e.target.value)}
                 placeholder="e.g. Schedule a Free 15-Min Discovery Call"
                 className={INPUT_CLASS}
               />
+              <CharCount value={bookingTitle.length} max={BOOKING_TITLE_MAX} />
             </div>
 
             <div className="space-y-1.5">
@@ -1635,12 +2150,13 @@ export function BusinessHubManager({
                 id="bh-catalog-title"
                 autoComplete="off"
                 name="catalog_title"
-                maxLength={60}
+                maxLength={CATALOG_TITLE_MAX}
                 value={catalogTitle}
                 onChange={(e) => setCatalogTitle(e.target.value)}
                 placeholder="e.g. 2026 Product Catalog & Price List"
                 className={INPUT_CLASS}
               />
+              <CharCount value={catalogTitle.length} max={CATALOG_TITLE_MAX} />
             </div>
 
             <div className="space-y-1.5">

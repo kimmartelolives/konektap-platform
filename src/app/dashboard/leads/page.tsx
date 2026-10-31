@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import TierGate, { AccountTier, hasTierAccess } from "@/components/dashboard/TierGate";
+// 1. Tinanggal ang hasTierAccess sa import line na ito
+import TierGate, { AccountTier } from "@/components/dashboard/TierGate";
 import { LeadsManager } from "@/components/dashboard/leads-manager";
 
 async function LeadsContent() {
@@ -23,9 +24,9 @@ async function LeadsContent() {
   const userTier = (profile?.tier as AccountTier) || "demo";
   const showLeadForm = profile?.show_lead_form ?? true;
 
-  // Only fetch leads when the user can actually see them
+  // 2. Pinalitan ng inline check (userTier === "standard" || userTier === "premium")
   let leads: any[] = [];
-  if (hasTierAccess(userTier, "standard")) {
+  if (userTier === "standard" || userTier === "premium") {
     const { data } = await supabase
       .from("leads")
       .select("*")
