@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   LogOut,
   Loader2,
+  Tag,
   type LucideIcon,
 } from "lucide-react";
 import { useFormStatus } from "react-dom";
@@ -24,10 +25,11 @@ type NavLink = {
 
 const ADMIN_BASE = "/admin-soniry-hq-x8y9z2026";
 
-// Main admin pages (used by both the desktop sidebar and the mobile menu)
+// 2. Idagdag ang Pricing & Promos sa mainLinks
 const mainLinks: NavLink[] = [
   { name: "Overview", href: ADMIN_BASE, icon: Activity },
   { name: "User Management", href: `${ADMIN_BASE}/users`, icon: Users },
+  { name: "Pricing & Promos", href: `${ADMIN_BASE}/pricing`, icon: Tag },
 ];
 
 const exitLink: NavLink = { name: "Exit to Dashboard", href: "/dashboard", icon: ArrowLeft };

@@ -2,34 +2,35 @@
 
 import { createClient } from "@/lib/supabase/server";
 
-const PLAN_PRICES: Record<"standard" | "premium", { amount: number; name: string }> = {
-  standard: { amount: 299, name: "KonekTap Standard Tier" },
-  premium: { amount: 599, name: "KonekTap Premium Tier" },
-};
-
 export async function createCheckoutSession(targetTier: "standard" | "premium") {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
-    return { error: "Kailangan mong mag-login muna." };
-  }
+  if (!user) return { error: "Kailangan mong mag-login muna." };
 
-  const plan = PLAN_PRICES[targetTier];
-  if (!plan) {
-    return { error: "Invalid subscription plan." };
-  }
+  // 1. Kunin ang dynamic pricing mula sa Supabase
+  const { data: plan, error: dbError } = await supabase
+    .from("pricing_tiers")
+    .select("*")
+    .eq("id", targetTier)
+    .single();
+
+  if (dbError || !plan) return { error: "Hindi mahanap ang pricing plan." };
+
+  // 2. Kalkulahin kung gagamitin ang base price o discount price
+  const now = new Date();
+  const hasActiveDiscount = 
+    plan.discount_price !== null && 
+    plan.discount_end_date && 
+    new Date(plan.discount_end_date) > now;
+
+  const finalAmount = hasActiveDiscount ? plan.discount_price : plan.base_price;
 
   const secretKey = process.env.XENDIT_SECRET_KEY;
-  if (!secretKey) {
-    return { error: "Missing XENDIT_SECRET_KEY in environment variables." };
-  }
+  if (!secretKey) return { error: "Missing XENDIT_SECRET_KEY" };
 
   const rawAppUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const appUrl = rawAppUrl.replace(/\/$/, "");
-
   const externalId = `inv_${user.id}_${targetTier}_${Date.now()}`;
   const authHeader = Buffer.from(`${secretKey}:`).toString("base64");
 
@@ -43,9 +44,9 @@ export async function createCheckoutSession(targetTier: "standard" | "premium") 
       },
       body: JSON.stringify({
         external_id: externalId,
-        amount: plan.amount,
+        amount: finalAmount, // Dito papasok ang dynamic o discounted price
         currency: "PHP",
-        description: `Upgrade account (${user.email}) to ${plan.name}`,
+        description: `Upgrade account to ${plan.name}`,
         payer_email: user.email,
         success_redirect_url: `${appUrl}/dashboard/billing?upgrade=success&tier=${targetTier}`,
         failure_redirect_url: `${appUrl}/dashboard/billing?upgrade=cancelled`,
@@ -57,15 +58,10 @@ export async function createCheckoutSession(targetTier: "standard" | "premium") 
     });
 
     const result = await response.json();
-
-    if (!response.ok) {
-      console.error("[Xendit Invoice Error]:", result);
-      return { error: result?.message || "Hindi makagawa ng payment link." };
-    }
-
+    if (!response.ok) return { error: result?.message || "Payment link creation failed." };
+    
     return { checkoutUrl: result.invoice_url as string };
   } catch (err) {
-    console.error("[Xendit Network Error]:", err);
-    return { error: "Network error habang kumokonekta sa Xendit." };
+    return { error: "Network error sa payment gateway." };
   }
 }
