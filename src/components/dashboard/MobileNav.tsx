@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AlertCircle,
   Menu,
   X,
   Wifi,
@@ -19,17 +20,20 @@ import {
   Briefcase,
   Loader2,
   Sparkles,
+  Shield,
   type LucideIcon,
 } from "lucide-react";
 import { useFormStatus } from "react-dom";
 import { AccountTier, TIER_CONFIG, hasTierAccess } from "./TierGate";
 
-// TODO: palitan ng actual upgrade link mo (same value as sa layout.tsx)
-const UPGRADE_URL = "https://facebook.com";
+const UPGRADE_URL = "/dashboard/billing";
 
 interface MobileNavProps {
   userEmail?: string;
   userTier?: AccountTier;
+  userRole?: string;
+  loading?: boolean;
+  loadError?: boolean;
 }
 
 type NavLink = {
@@ -39,7 +43,6 @@ type NavLink = {
   minTier?: AccountTier;
 };
 
-// Module-level so the array isn't re-created on every render
 const navLinks: NavLink[] = [
   { name: "Overview", href: "/dashboard", icon: BarChart },
   { name: "Profile Info", href: "/dashboard/profile", icon: User },
@@ -55,13 +58,11 @@ function planLabel(tier: AccountTier): string {
   return tier.charAt(0).toUpperCase() + tier.slice(1);
 }
 
-// Highlights sub-routes too (e.g. /dashboard/portfolio/new), but keeps Overview exact
 function isLinkActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-// Must be rendered inside the <form> so useFormStatus can read its pending state
 function SignOutButton() {
   const { pending } = useFormStatus();
 
@@ -81,21 +82,25 @@ function SignOutButton() {
   );
 }
 
-export default function MobileNav({ userEmail, userTier = "demo" }: MobileNavProps) {
+export default function MobileNav({
+  userEmail,
+  userTier = "demo",
+  userRole = "user",
+  loading = false,
+  loadError = false,
+}: MobileNavProps) {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname() ?? "";
   const menuId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
 
   const badge = TIER_CONFIG[userTier];
-  const canUpgrade = userTier !== "premium";
+  const canUpgrade = !loading && userTier !== "premium";
 
-  // Close the menu whenever the route changes (covers back/forward and in-page links)
   useEffect(() => {
     setIsOpen(false);
   }, [pathname]);
 
-  // Escape closes the menu and returns focus to the toggle button
   useEffect(() => {
     if (!isOpen) return;
 
@@ -112,7 +117,6 @@ export default function MobileNav({ userEmail, userTier = "demo" }: MobileNavPro
 
   return (
     <div className="md:hidden w-full bg-white dark:bg-dark-900 border-b border-slate-200 dark:border-white/10 sticky top-0 z-50">
-      {/* Tap outside the menu to close it */}
       {isOpen && (
         <button
           type="button"
@@ -123,7 +127,6 @@ export default function MobileNav({ userEmail, userTier = "demo" }: MobileNavPro
         />
       )}
 
-      {/* Top Bar Header */}
       <div className="relative z-10 flex items-center justify-between px-4 py-3 bg-white dark:bg-dark-900">
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center shadow-md">
@@ -132,9 +135,16 @@ export default function MobileNav({ userEmail, userTier = "demo" }: MobileNavPro
           <span className="font-display font-bold text-base text-slate-900 dark:text-white">
             KonekTap
           </span>
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.badgeClass}`}>
-            {badge.label}
-          </span>
+          {loading ? (
+            <span
+              aria-hidden="true"
+              className="h-4 w-12 rounded-full bg-slate-200 dark:bg-slate-800 animate-pulse"
+            />
+          ) : (
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.badgeClass}`}>
+              {badge.label}
+            </span>
+          )}
         </div>
 
         <button
@@ -150,7 +160,6 @@ export default function MobileNav({ userEmail, userTier = "demo" }: MobileNavPro
         </button>
       </div>
 
-      {/* Dropdown Menu when Hamburger is Clicked */}
       {isOpen && (
         <div
           id={menuId}
@@ -159,7 +168,7 @@ export default function MobileNav({ userEmail, userTier = "demo" }: MobileNavPro
           <nav aria-label="Dashboard" className="space-y-1">
             {navLinks.map((link) => {
               const Icon = link.icon;
-              const isLocked = link.minTier ? !hasTierAccess(userTier, link.minTier) : false;
+              const isLocked = !loading && link.minTier ? !hasTierAccess(userTier, link.minTier) : false;
               const isActive = isLinkActive(pathname, link.href);
 
               return (
@@ -201,22 +210,50 @@ export default function MobileNav({ userEmail, userTier = "demo" }: MobileNavPro
                 <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
                   {userEmail}
                 </p>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.badgeClass}`}>
-                  {badge.label}
-                </span>
+                {loading ? (
+                  <span
+                    aria-hidden="true"
+                    className="h-4 w-12 rounded-full bg-slate-200 dark:bg-slate-800 animate-pulse"
+                  />
+                ) : (
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.badgeClass}`}>
+                    {badge.label}
+                  </span>
+                )}
               </div>
             )}
 
+            {loadError && (
+              <p
+                role="alert"
+                className="px-3 text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5"
+              >
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                Couldn&apos;t load your plan. Showing limited access. Refresh to try again.
+              </p>
+            )}
+
+            {/* LILITAW LANG KUNG ADMIN */}
+            {userRole === "admin" && (
+              <Link
+                href="/admin-soniry-hq-x8y9z2026"
+                onClick={() => setIsOpen(false)}
+                className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-sm font-bold shadow-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/60 focus-visible:ring-offset-2"
+              >
+                <Shield className="w-4 h-4" />
+                Go to Admin Panel
+              </Link>
+            )}
+
             {canUpgrade && (
-              <a
+              <Link
                 href={UPGRADE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+                onClick={() => setIsOpen(false)}
                 className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold shadow-md shadow-brand-500/20 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-2"
               >
                 <Sparkles className="w-4 h-4" />
                 Upgrade Plan
-              </a>
+              </Link>
             )}
 
             <form action="/auth/logout" method="POST">

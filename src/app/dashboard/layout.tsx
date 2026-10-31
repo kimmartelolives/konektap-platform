@@ -17,17 +17,17 @@ import {
   Loader2,
   Sparkles,
   AlertCircle,
+  Shield,
   type LucideIcon,
 } from "lucide-react";
 import { useFormStatus } from "react-dom";
-import { createClient } from "@/lib/supabase/client"; // Client-side supabase para sa client component
+import { createClient } from "@/lib/supabase/client";
 import { Suspense, useEffect, useRef, useState } from "react";
 import MobileNav from "@/components/dashboard/MobileNav";
-import { AccountTier, TIER_CONFIG } from "@/components/dashboard/TierGate";
+import { AccountTier, TIER_CONFIG, hasTierAccess } from "@/components/dashboard/TierGate";
 
-// TODO: palitan ng actual login route / upgrade link mo
 const LOGIN_PATH = "/login";
-const UPGRADE_URL = "https://facebook.com";
+const UPGRADE_URL = "/dashboard/billing";
 
 type NavLink = {
   name: string;
@@ -47,29 +47,21 @@ const navLinks: NavLink[] = [
   { name: "NFC Cards", href: "/dashboard/nfc-cards", icon: CreditCard, minTier: "standard" },
 ];
 
-// Higher rank = higher plan. Easy to extend if a new tier is added.
-const TIER_RANK: Record<string, number> = { demo: 0, standard: 1, premium: 2 };
+const KNOWN_TIERS: string[] = Object.keys(TIER_CONFIG);
 
 function isKnownTier(value: unknown): value is AccountTier {
-  return typeof value === "string" && value in TIER_RANK;
-}
-
-function hasAccess(userTier: AccountTier, minTier?: AccountTier): boolean {
-  if (!minTier) return true;
-  return (TIER_RANK[userTier] ?? 0) >= (TIER_RANK[minTier] ?? 0);
+  return typeof value === "string" && KNOWN_TIERS.includes(value);
 }
 
 function planLabel(tier: AccountTier): string {
   return tier.charAt(0).toUpperCase() + tier.slice(1);
 }
 
-// Highlights sub-routes too (e.g. /dashboard/portfolio/new), but keeps Overview exact
 function isLinkActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-// Client component para sa nav links para masupport ang active path at tier check
 function SidebarNavLinksClient({ tier }: { tier: AccountTier }) {
   const pathname = usePathname() ?? "";
 
@@ -77,7 +69,7 @@ function SidebarNavLinksClient({ tier }: { tier: AccountTier }) {
     <nav aria-label="Dashboard" className="flex-1 overflow-y-auto p-4 space-y-1">
       {navLinks.map((link) => {
         const Icon = link.icon;
-        const accessible = hasAccess(tier, link.minTier);
+        const accessible = !link.minTier || hasTierAccess(tier, link.minTier);
         const isActive = isLinkActive(pathname, link.href);
 
         return (
@@ -114,7 +106,6 @@ function SidebarNavLinksClient({ tier }: { tier: AccountTier }) {
   );
 }
 
-// Must be rendered inside the <form> so useFormStatus can read its pending state
 function SignOutButton() {
   const { pending } = useFormStatus();
 
@@ -141,6 +132,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const [userEmail, setUserEmail] = useState<string | undefined>();
   const [userTier, setUserTier] = useState<AccountTier>("demo");
+  const [userRole, setUserRole] = useState<string>("user");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -158,7 +150,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         if (cancelled) return;
 
-        // Not signed in (or session expired): send them to login
         if (authError || !user) {
           redirecting = true;
           router.replace(LOGIN_PATH);
@@ -167,7 +158,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("tier")
+          .select("tier, role")
           .eq("id", user.id)
           .single();
 
@@ -179,12 +170,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           setLoadError(true);
         }
         setUserTier(isKnownTier(profile?.tier) ? profile.tier : "demo");
+        setUserRole(profile?.role || "user");
       } catch (err) {
         if (cancelled) return;
         console.error("Dashboard layout error:", err);
         setLoadError(true);
       } finally {
-        // Keep the skeleton up while redirecting to avoid a flash of demo-tier UI
         if (!cancelled && !redirecting) setLoading(false);
       }
     }
@@ -193,9 +184,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, pathname]); // Nagre-refetch din kapag bumalik mula sa billing/upgrade
 
-  // <main> is its own scroll container, so reset its scroll on every page change
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
   }, [pathname]);
@@ -205,7 +195,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="h-dvh overflow-hidden bg-slate-50 dark:bg-dark-950 flex flex-col md:flex-row">
-      {/* Skip link for keyboard / screen reader users */}
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2 focus:rounded-xl focus:bg-brand-600 focus:text-white focus:text-sm focus:font-semibold"
@@ -213,12 +202,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         Skip to content
       </a>
 
-      {/* Mobile Hamburger Header */}
-      <MobileNav userEmail={userEmail} userTier={userTier} />
+      <MobileNav
+        userEmail={userEmail}
+        userTier={userTier}
+        userRole={userRole}
+        loading={loading}
+        loadError={loadError}
+      />
 
-      {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-64 glass-card border-r border-slate-200 dark:border-white/10 flex-col shrink-0 h-full z-30">
-        {/* LOGO */}
         <div className="p-6 border-b border-slate-200 dark:border-white/10 flex items-center gap-3 shrink-0">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center shadow-lg">
             <Wifi className="rotate-90 text-white w-4 h-4" />
@@ -228,7 +220,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </span>
         </div>
 
-        {/* NAVIGATION WITH ACTIVE HIGHLIGHT & PLAN LOCKS */}
         {loading ? (
           <nav
             aria-label="Dashboard"
@@ -243,16 +234,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <SidebarNavLinksClient tier={userTier} />
         )}
 
-        {/* FOOTER */}
         <div className="p-4 border-t border-slate-200 dark:border-white/10 shrink-0 bg-white/50 dark:bg-dark-900/50">
           <div className="px-3 mb-3 space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 Account Plan
               </span>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.badgeClass}`}>
-                {badge.label}
-              </span>
+              {loading ? (
+                <span
+                  aria-hidden="true"
+                  className="h-4 w-12 rounded-full bg-slate-200 dark:bg-slate-800 animate-pulse"
+                />
+              ) : (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.badgeClass}`}>
+                  {badge.label}
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{userEmail}</p>
 
@@ -267,16 +264,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             )}
           </div>
 
+          {userRole === "admin" && (
+            <Link
+              href="/admin-soniry-hq-x8y9z2026"
+              className="mb-2 w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-200 text-sm font-semibold shadow-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/60 focus-visible:ring-offset-2"
+            >
+              <Shield className="w-4 h-4" />
+              Go to Admin Panel
+            </Link>
+          )}
+
           {canUpgrade && (
-            <a
+            <Link
               href={UPGRADE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
               className="mb-2 w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold shadow-md shadow-brand-500/20 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-2"
             >
               <Sparkles className="w-4 h-4" />
               Upgrade Plan
-            </a>
+            </Link>
           )}
 
           <form action="/auth/logout" method="POST">
@@ -285,7 +290,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <main
         ref={mainRef}
         id="main-content"

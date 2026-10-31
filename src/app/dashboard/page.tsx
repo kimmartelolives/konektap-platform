@@ -165,15 +165,26 @@ async function DashboardContent() {
   );
 }
 
+// Loading box: kapareho ng "Loading your links..." sa Links page
+function DashboardLoading() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-col items-center justify-center py-20 rounded-3xl border-2 border-dashed border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-white/[0.02]"
+    >
+      <Loader2 className="w-8 h-8 animate-spin text-brand-500 mb-4" />
+      <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
+        Loading analytics...
+      </p>
+    </div>
+  );
+}
+
 // 2. ANG ROOT PAGE NA IBABALOT SA SUSPENSE
 export default function DashboardOverviewPage() {
   return (
-    <Suspense fallback={
-      <div className="flex flex-col items-center justify-center min-h-[50vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-brand-500 mb-4" />
-        <p className="text-sm text-slate-500 font-medium animate-pulse">Loading analytics...</p>
-      </div>
-    }>
+    <Suspense fallback={<DashboardLoading />}>
       <DashboardContent />
     </Suspense>
   );

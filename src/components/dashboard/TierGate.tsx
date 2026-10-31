@@ -2,10 +2,7 @@ import { useId } from "react";
 import { Lock, Sparkles, CheckCircle2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
-// TODO: replace with your real upgrade / order link (keep in sync with layout.tsx & MobileNav.tsx).
-// NOTE: this must NOT point at a tier-gated page. The old link went to /dashboard/nfc-cards,
-// which is itself Standard-only, so demo users were sent right back to the same gate.
-const UPGRADE_URL = "https://facebook.com";
+const UPGRADE_URL = "/dashboard/billing";
 
 export type AccountTier = "demo" | "standard" | "premium";
 
@@ -38,14 +35,14 @@ export const TIER_CONFIG: Record<
   },
   standard: {
     label: "STANDARD",
-    price: "₱799",
+    price: "₱299",
     badgeClass: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20",
     maxSocialLinks: 10,
     maxPortfolioItems: 6,
   },
   premium: {
     label: "PREMIUM",
-    price: "₱1,499",
+    price: "₱599",
     badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20",
     maxSocialLinks: 99,
     maxPortfolioItems: 99,
@@ -166,15 +163,14 @@ export default function TierGate({
           Back to Overview
         </Link>
 
-        <a
+        {/* Naka-link na sa /dashboard/billing gamit ang Next.js Link */}
+        <Link
           href={UPGRADE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
           className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-2"
         >
           <Sparkles aria-hidden="true" className="w-4 h-4" />
           Upgrade to {targetPlan.label} ({targetPlan.price})
-        </a>
+        </Link>
       </div>
     </section>
   );
