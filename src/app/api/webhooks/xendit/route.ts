@@ -13,12 +13,14 @@ export async function POST(req: Request) {
 
     const payload = await req.json();
     const status = payload?.status; // "PAID" o "SETTLED"
-    const metadata = payload?.metadata;
+    const externalId = payload?.external_id || "";
+
+    // Fallback: Kunin ang data mula sa external_id (Format: inv_{user_id}_{target_tier}_{timestamp})
+    const parts = externalId.split("_");
+    const userId = payload?.metadata?.user_id || parts[1];
+    const targetTier = payload?.metadata?.target_tier || parts[2];
 
     if (status === "PAID" || status === "SETTLED") {
-      const userId = metadata?.user_id;
-      const targetTier = metadata?.target_tier;
-
       if (userId && (targetTier === "standard" || targetTier === "premium")) {
         const supabaseAdmin = createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,6 +38,8 @@ export async function POST(req: Request) {
         }
 
         console.log(`[Xendit Webhook] Successfully upgraded user ${userId} to ${targetTier}`);
+      } else {
+        console.error("[Xendit Webhook] Missing userId or targetTier", { externalId, parts });
       }
     }
 
